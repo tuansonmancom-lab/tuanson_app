@@ -108,7 +108,7 @@ def init_db():
         )
     ''')
 
-    # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
+   # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
     
     # Safe column additions for suppliers table
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
@@ -119,10 +119,10 @@ def init_db():
 
     # Safe column addition for requests table category
     try:
-    c.execute("ALTER TABLE requests ADD COLUMN category TEXT DEFAULT 'Direct M'")
-except sqlite3.OperationalError:
-    # The column already exists, so we can safely ignore this error
-    pass
+        c.execute("ALTER TABLE requests ADD COLUMN category TEXT DEFAULT 'Direct M'")
+    except sqlite3.OperationalError:
+        # The column already exists, so we can safely ignore this error
+        pass
 
     # Safe column additions for Payables Monitoring
     try:
