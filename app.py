@@ -1,39 +1,45 @@
-import libsql
+import sqlite3
 import pandas as pd
 import streamlit as st
 from datetime import datetime
-from io import BytesIO  # <--- Ensure this line is included
-import sqlite3
+from io import BytesIO
 
-# ReportLab imports (if using ReportLab)
 # --- REPORTLAB PDF GENERATION LIBRARIES ---
 try:
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
-    from reportlab.lib.styles import (
-        getSampleStyleSheet,
-        ParagraphStyle,
-    )  # <--- ParagraphStyle added here
-
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     HAS_REPORTLAB = True
 except ImportError:
     HAS_REPORTLAB = False
-
-# --- DATABASE SETUP (TURSO CLOUD) ---
-url = st.secrets["turso"]["database_url"]
-auth_token = st.secrets["turso"]["auth_token"]
-
+    
+# --- DATABASE SETUP (Cloud-Optimized) ---
+# Note: In cloud environments (like Streamlit Community Cloud), local SQLite files are ephemeral 
+# and will reset on app reboot/redeploy unless connected to a persistent volume or external DB.
+DB_NAME = "inventory.db"
 
 def init_db():
-    conn = libsql.connect(database=url, auth_token=auth_token)
+    # check_same_thread=False is crucial for multi-threaded cloud web servers like Streamlit
+    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
     c = conn.cursor()
+    
+    # WAL mode can sometimes behave unpredictably on certain cloud container network filesystems,
+    # but works well with standard local disk persistence. Wrapped in try/except for cloud safety.
+    try:
+        c.execute("PRAGMA journal_mode = WAL;")
+        c.execute("PRAGMA synchronous = NORMAL;")
+        c.execute("PRAGMA busy_timeout = 5000;")
+    except sqlite3.OperationalError:
+        pass
+
     # 1. Projects Master Table
-    c.execute("""CREATE TABLE IF NOT EXISTS projects (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 project_name TEXT UNIQUE)""")
-    # 2. Activities Master Table (Updated to include qty, unit, and contract_amount)
+    c.execute('''CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT UNIQUE)''')
+    
+    # 2. Activities Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS activities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER,
@@ -84,7 +90,7 @@ def init_db():
                 received_status TEXT DEFAULT 'Pending',
                 received_timestamp DATETIME)''')
 
-    # 6. Deliveries / Receiving Master Table (Updated with receipt fields)
+    # 6. Deliveries / Receiving Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS deliveries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pono TEXT,
@@ -97,8 +103,7 @@ def init_db():
                 receipt_image BLOB,
                 file_name TEXT)''')
 
-    # 7. Signatories Master Table (NEW)
-    # Ensure signatories table exists with proper structure
+    # 7. Signatories Master Table
     c.execute('''
         CREATE TABLE IF NOT EXISTS signatories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,66 +113,30 @@ def init_db():
         )
     ''')
 
-   # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
-    
-    # Safe column additions for suppliers table
+    # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
         try:
             c.execute(f"ALTER TABLE suppliers ADD COLUMN {col} TEXT")
-        except Exception:
-            pass
-
-    # Safe column addition for requests table category
-    try:
-        c.execute("ALTER TABLE requests ADD COLUMN category TEXT DEFAULT 'Direct M'")
-    except sqlite3.OperationalError:
-        # The column already exists, so we can safely ignore this error
-        pass
-
-    # Safe column additions for Payables Monitoring
-    try:
-        c.execute("ALTER TABLE suppliers ADD COLUMN terms_days INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        c.execute("ALTER TABLE requests ADD COLUMN payment_status TEXT DEFAULT 'Unpaid'")
-    except sqlite3.OperationalError:
-        pass
-
-    # Safe column additions for Receiving Items
-    try:
-        c.execute("ALTER TABLE requests ADD COLUMN received_status TEXT DEFAULT 'Pending'")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        c.execute("ALTER TABLE requests ADD COLUMN received_timestamp DATETIME")
-    except sqlite3.OperationalError:
-        pass
-
-    # Safe column additions for Activities (contract_amount, qty, unit)
-    try:
-        c.execute("ALTER TABLE activities ADD COLUMN contract_amount REAL DEFAULT 0.0")
-    except sqlite3.OperationalError:
-        pass
-
-    for col_def in [("qty", "REAL DEFAULT 1.0"), ("unit", "TEXT DEFAULT 'lot'")]:
-        try:
-            c.execute(f"ALTER TABLE activities ADD COLUMN {col_def[0]} {col_def[1]}")
         except sqlite3.OperationalError:
             pass
 
-    # Safe column additions for Deliveries Receipt Attachments
-    try:
-        c.execute("ALTER TABLE deliveries ADD COLUMN receipt_image BLOB")
-    except sqlite3.OperationalError:
-        pass
-
-    try:
-        c.execute("ALTER TABLE deliveries ADD COLUMN file_name TEXT")
-    except sqlite3.OperationalError:
-        pass
+    for col_sql in [
+        ("materials", "category", "TEXT DEFAULT 'Direct Materials'"),
+        ("requests", "category", "TEXT DEFAULT 'Direct Materials'"),
+        ("suppliers", "terms_days", "INTEGER DEFAULT 0"),
+        ("requests", "payment_status", "TEXT DEFAULT 'Unpaid'"),
+        ("requests", "received_status", "TEXT DEFAULT 'Pending'"),
+        ("requests", "received_timestamp", "DATETIME"),
+        ("activities", "contract_amount", "REAL DEFAULT 0.0"),
+        ("activities", "qty", "REAL DEFAULT 1.0"),
+        ("activities", "unit", "TEXT DEFAULT 'lot'"),
+        ("deliveries", "receipt_image", "BLOB"),
+        ("deliveries", "file_name", "TEXT")
+    ]:
+        try:
+            c.execute(f"ALTER TABLE {col_sql[0]} ADD COLUMN {col_sql[1]} {col_sql[2]}")
+        except sqlite3.OperationalError:
+            pass
 
     # --- SEED INITIAL DATA ---
     c.execute("SELECT COUNT(*) FROM projects")
@@ -205,7 +174,6 @@ def init_db():
             ('GDSM MARKETING', 'Lapu-Lapu City', 'Manager', '0917-000-0006', '777-888-999-000', 'Non-VAT', 0)
         ])
 
-    # Seed initial Signatories if table is empty
     c.execute("SELECT COUNT(*) FROM signatories")
     if c.fetchone()[0] == 0:
         c.executemany("INSERT INTO signatories (name, role, signature_path) VALUES (?, ?, ?)", [
@@ -229,15 +197,13 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-    # --- DEFAULT SIGNATORIES FALLBACKS ---
     prep_name = "VERGEL W. MANCIA"
     prep_sig_path = "Vergel_signature.png"
     appr_name = "LEIZEL A. CABUNILAS"
     appr_sig_path = "Leizel_signature.png"
 
-    # --- SAFELY FETCH SIGNATORIES VIA INDEPENDENT CONCURRENT CONNECTION ---
     try:
-        with libsql.connect(database=url, auth_token=auth_token) as pdf_conn:
+        with sqlite3.connect("inventory.db", check_same_thread=False) as pdf_conn:
             cursor = pdf_conn.cursor()
             cursor.execute("SELECT name, role, signature_path FROM signatories")
             sigs = cursor.fetchall()
@@ -250,7 +216,7 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
                     if name: appr_name = name
                     if sig_path: appr_sig_path = sig_path.strip()
     except Exception:
-        pass  # Gracefully falls back to defaults if database is temporarily heavily contested
+        pass
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -264,14 +230,13 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     elements = []
     styles = getSampleStyleSheet()
     
-    # --- STYLES ---
     company_style = ParagraphStyle(
         'CompanyRed',
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
         fontSize=18,
         leading=20,
-        textColor=colors.HexColor("#CC0000") # Official Red Title
+        textColor=colors.HexColor("#CC0000")
     )
     
     po_title_style = ParagraphStyle(
@@ -280,7 +245,7 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
         fontName='Helvetica-Bold',
         fontSize=14,
         leading=16,
-        alignment=1, # Centered
+        alignment=1,
         textColor=colors.black
     )
     
@@ -290,7 +255,7 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
         fontName='Helvetica-Bold',
         fontSize=14,
         leading=16,
-        alignment=2, # Right aligned
+        alignment=2,
         textColor=colors.black
     )
     
@@ -318,7 +283,7 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
         fontName='Helvetica-Bold',
         fontSize=8,
         leading=10,
-        alignment=1, # Centered headers
+        alignment=1,
         textColor=colors.black
     )
     
@@ -342,7 +307,6 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
         alignment=2
     )
 
-    # --- 1. HEADER SECTION ---
     company_text = Paragraph(
         "<b>TUANSON CONSTRUCTION</b> <font size=7 color='black'>162 P. Labuca St., Cansojong, Talisay City, Cebu Tel: 032 273-1187</font><br/>"
         "<font size=7 color='black'>web: www.tuansoncons.com, email: ric_tuanson@yahoo.com.ph</font>",
@@ -360,7 +324,6 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
 
     elements.append(Spacer(1, 10))
 
-    # --- 2. TITLE AND PO NUMBER ROW ---
     title_table = Table([
         [Paragraph("<b>PURCHASE ORDER</b>", po_title_style), Paragraph(f"P.O. NO. &nbsp;&nbsp;&nbsp;&nbsp; <b>{pono}</b>", po_no_style)]
     ], colWidths=[340, 200])
@@ -369,7 +332,6 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
 
     elements.append(Spacer(1, 8))
 
-    # --- 3. METADATA SECTION ---
     meta_data = [
         [Paragraph("PAYEE:", meta_label_style), Paragraph(str(supplier), meta_val_style), Paragraph("DATE:", meta_label_style), Paragraph(str(date_str), meta_val_style)],
         [Paragraph("PROJECT NAME:", meta_label_style), Paragraph(str(project), meta_val_style), "", ""]
@@ -385,7 +347,6 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
 
     elements.append(Spacer(1, 8))
 
-    # --- 4. ITEMS TABLE (Wireframe Grid Layout) ---
     table_data = [[
         Paragraph("NO.", hdr_style),
         Paragraph("QTY", hdr_style),
@@ -432,7 +393,6 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     ]))
     elements.append(po_table)
 
-    # --- 5. FOOTER & SIGNATURE SECTION ---
     current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     prep_element = Paragraph(f"<b>{prep_name}</b><br/>Prepared by:", center_cell_style)
@@ -480,8 +440,6 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     buffer.seek(0)
     return buffer.getvalue()
 
-
-
 # --- APP LAYOUT ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
@@ -489,21 +447,19 @@ st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 role = st.sidebar.selectbox("🔑 Select Your Role (Trial Mode)", 
                             ["Requisitor", "Purchaser", "Approver", "Office Manager", "Admin View All"])
 
-conn = libsql.connect(database=url, auth_token=auth_token)
+# Cloud Connection Management (check_same_thread=False prevents threading exceptions in Streamlit)
+conn = sqlite3.connect(DB_NAME, check_same_thread=False)
 c = conn.cursor()
 
 # --- ROLE 1: REQUISITOR ---
 if role == "Requisitor":
     st.subheader("📋 New Material Request Form")
     
-    # Initialize a temporary list (cart) in session state if it doesn't exist yet
     if "request_cart" not in st.session_state:
         st.session_state.request_cart = []
     
-    # 1. SELECTION CONTROLS (Outside form for real-time dynamic updates)
     col_proj, col_act = st.columns(2)
     
-    # Corrected row unpack parsing from your database query schema format
     projects = [r[0] for r in c.execute("SELECT project_name FROM projects").fetchall()]
     selected_project = col_proj.selectbox("Project Name", projects)
     
@@ -512,18 +468,15 @@ if role == "Requisitor":
     activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
     selected_activity = col_act.selectbox("Activity", activities if activities else ["N/A"])
     
-    # Material selection with Category retrieval
     materials = c.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
     mat_options = {f"[{m[0]}] {m[1]}": (m[0], m[1], m[2], m[3]) for m in materials} if materials else {"No materials": ("00000", "N/A", "PCS", "Direct Materials")}
     
     selected_mat_label = st.selectbox("Select Item", list(mat_options.keys()))
     item_no, description, default_unit, default_category = mat_options[selected_mat_label]
     
-    # Fetch suppliers from your master database setup for the custom dropdown
     suppliers = [r[0] for r in c.execute("SELECT supplier_name FROM suppliers").fetchall()]
     supplier_options = ["No Preference"] + suppliers
 
-    # 2. FORM DETAILS & ADD TO LIST
     with st.form("request_form"):
         category_options = ["Direct Materials", "Equipment & Rental", "Tools & Consumables", "Fuel & Lubricants", "Subcontract & Services"]
         cat_index = category_options.index(default_category) if default_category in category_options else 0
@@ -532,7 +485,6 @@ if role == "Requisitor":
         category = col_cat.selectbox("Category (Accounting Tag)", category_options, index=cat_index)
         unit = col_unit.text_input("Unit", value=default_unit)
         
-        # 3-column split pattern directly balances Quantity, Price, and Supplier input components
         col1, col2, col3 = st.columns([1, 1, 1.5])
         qty = col1.number_input("Quantity", min_value=1.0, step=1.0)
         price = col2.number_input("Estimated Price (Optional)", min_value=0.0, step=10.0)
@@ -552,12 +504,11 @@ if role == "Requisitor":
                 "Qty": qty,
                 "Unit": unit,
                 "Price": price,
-                "supplier": suggested_supplier, # Matches your table column string casing perfectly
+                "supplier": suggested_supplier,
                 "Email": email
             })
             st.success(f"Added {qty} {unit} of {description} ({category}) to your list!")
 
-    # 3. REVIEW AND BATCH SUBMISSION SECTION
     if len(st.session_state.request_cart) > 0:
         st.markdown("---")
         st.subheader("🛒 Review & Edit Temporary List")
@@ -573,14 +524,11 @@ if role == "Requisitor":
         
         st.session_state.request_cart = edited_cart_df.to_dict('records')
         
-        # Final Submit Button
         if st.button("🚀 Submit All Requests to Purchasing"):
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             for item in st.session_state.request_cart:
                 amount = item["Qty"] * item["Price"]
-                
-                # Directly mirrors all database schemas from your table architecture map 
                 c.execute("""INSERT INTO requests 
                              (timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, email_address, status, supplier)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Purchaser', ?)""",
@@ -592,27 +540,20 @@ if role == "Requisitor":
             st.success("All items successfully submitted to Purchasing!")
             st.rerun()
 
-
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
     st.subheader("🛒 Purchaser Dashboard")
     
-    # Create tabs to separate Purchasing and Receiving duties
     tab_create_po, tab_receive = st.tabs(["📝 Create Purchase Orders", "📦 Receive Deliveries"])
     
-    # =========================================================
-    # TAB 1: CREATE PURCHASE ORDERS
-    # =========================================================
     with tab_create_po:
         st.write("### 🛒 Batch Create P.O.")
         
-        # 1. Fetch pending requests - 🌟 UPDATED: Included 'supplier' in your SQL query strings
         pending_df = pd.read_sql_query(
             "SELECT id, project_name, activity, item_no, description, qty, unit, price AS est_price, supplier FROM requests WHERE status = 'Pending Purchaser'", 
             conn
         )
         
-        # Fetch the last used PO number with leading zeros preserved
         last_po_query = "SELECT pono FROM requests WHERE pono IS NOT NULL AND pono != '' ORDER BY id DESC LIMIT 1"
         last_po_result = c.execute(last_po_query).fetchone()
         
@@ -625,7 +566,6 @@ elif role == "Purchaser":
         if pending_df.empty:
             st.info("No pending requests waiting for Purchasing.")
         else:
-            # Calculate Last Purchased Price for each item dynamically
             last_prices = []
             default_confirmed_prices = []
             
@@ -633,7 +573,6 @@ elif role == "Purchaser":
                 item_no = row['item_no']
                 est = row['est_price'] if pd.notnull(row['est_price']) else 0.0
                 
-                # Query database for the latest non-zero price for this material
                 res = c.execute("""
                     SELECT price FROM requests 
                     WHERE item_no = ? AND price > 0 AND status != 'Pending Purchaser' 
@@ -642,35 +581,24 @@ elif role == "Purchaser":
                 
                 last_paid = res[0] if res else 0.0
                 last_prices.append(last_paid)
-                
-                # Default confirmed price uses last paid price first, else falls back to requisitor's estimated price
                 default_price = last_paid if last_paid > 0 else est
                 default_confirmed_prices.append(default_price)
                 
             pending_df["Last Purchase Price"] = last_prices
             pending_df["Confirmed Price"] = default_confirmed_prices
             
-            # 2. GLOBAL P.O. DETAILS
             st.write("#### 📝 1. Set P.O. Details")
             col1, col2 = st.columns(2)
             
-            # Fetch master vendor array
             suppliers_master = [s[0] for s in c.execute("SELECT supplier_name FROM suppliers").fetchall()]
             
-            # 🌟 NEW SMART ENGINE: Look at the first row's suggested supplier to automatically select the matching dropdown index
             default_vendor_index = 0
             if not pending_df.empty:
                 first_row_suggestion = pending_df.iloc[0]["supplier"]
                 if first_row_suggestion and first_row_suggestion in suppliers_master:
                     default_vendor_index = suppliers_master.index(first_row_suggestion)
             
-            # Your selectbox component now natively pre-fills matching Requisitor requests
-            selected_supplier = col1.selectbox(
-                "Select Supplier for this Order", 
-                suppliers_master, 
-                index=default_vendor_index
-            )
-            
+            selected_supplier = col1.selectbox("Select Supplier for this Order", suppliers_master, index=default_vendor_index)
             po_number = col2.text_input("Enter P.O. Number", value=suggested_po)
             
             if last_po:
@@ -679,14 +607,10 @@ elif role == "Purchaser":
                 col2.caption("💡 *No previous P.O. numbers found in the system.*")
                 
             st.markdown("---")
-            
-            # 3. ITEM SELECTION
             st.write("#### 📦 2. Select Items for this P.O.")
-            st.info("Check the **'Add to PO'** box and verify the **'Confirmed Price'**. You can enter exact decimals (e.g. 260.35).")
+            st.info("Check the **'Add to PO'** box and verify the **'Confirmed Price'**.")
             
             pending_df.insert(0, "Add to PO", False) 
-            
-            # 🌟 UPDATED: Cleanly format column strings for the user frame display view
             pending_df.rename(columns={"supplier": "Suggested Supplier"}, inplace=True)
             
             edited_df = st.data_editor(
@@ -694,34 +618,16 @@ elif role == "Purchaser":
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "Add to PO": st.column_config.CheckboxColumn(
-                        "Add to PO",
-                        help="Select this item to include it in the current P.O.",
-                        default=False,
-                    ),
-                    "Suggested Supplier": st.column_config.TextColumn(
-                        "Suggested Supplier",
-                        help="The vendor recommended by the site engineer."
-                    ),
-                    "Last Purchase Price": st.column_config.NumberColumn(
-                        "Last Purchase Price",
-                        format="₱%.2f",
-                        help="Historical price per unit from previous orders."
-                    ),
-                    "Confirmed Price": st.column_config.NumberColumn(
-                        "Confirmed Price",
-                        min_value=0.0,
-                        step=0.01,
-                        format="₱%.2f",
-                        help="Agreed price per unit for this order."
-                    ),
-                    "est_price": None, # Hide raw estimated cost key
+                    "Add to PO": st.column_config.CheckboxColumn("Add to PO", default=False),
+                    "Suggested Supplier": st.column_config.TextColumn("Suggested Supplier"),
+                    "Last Purchase Price": st.column_config.NumberColumn("Last Purchase Price", format="₱%.2f"),
+                    "Confirmed Price": st.column_config.NumberColumn("Confirmed Price", min_value=0.0, step=0.01, format="₱%.2f"),
+                    "est_price": None,
                     "id": None, 
                 },
                 disabled=["project_name", "activity", "item_no", "description", "qty", "unit", "Suggested Supplier", "Last Purchase Price"] 
             )
             
-            # 4. BATCH SUBMISSION
             if st.button("✅ Submit Purchase Order", type="primary"):
                 if not po_number.strip():
                     st.error("⚠️ Please enter a valid P.O. Number before submitting.")
@@ -746,18 +652,13 @@ elif role == "Purchaser":
                         st.success(f"Successfully created P.O. #{po_number} with {len(selected_items)} item(s)!")
                         st.rerun()
 
-    # =========================================================
-    # TAB 2: RECEIVE DELIVERIES (WITH DR ATTACHMENT & HISTORY VIEWER)
-    # =========================================================
     with tab_receive:
         st.write("### 🚚 Record Supplier Deliveries")
         st.info("Log items that have arrived on-site and upload attached Delivery Receipts (DR), Sales Invoices (SI), or Official Receipts (OR).")
         
-        # Display persistent success message across page reloads
         if "receive_success_msg" in st.session_state:
             st.success(st.session_state.pop("receive_success_msg"))
 
-        # Query approved but NOT YET received POs from requests
         pending_recv_df = pd.read_sql_query("""
             SELECT 
                 pono AS 'PO Number', 
@@ -783,13 +684,11 @@ elif role == "Purchaser":
             
             recv_col1, recv_col2 = st.columns(2)
             po_to_receive = recv_col1.selectbox("Select PO Number", pending_recv_df['PO Number'].tolist())
-            dr_number = recv_col2.text_input("DR / SI / OR Document Number", help="Enter Delivery Receipt, Sales Invoice, or Official Receipt Number")
+            dr_number = recv_col2.text_input("DR / SI / OR Document Number")
             
-            # File Upload Section for DR / SI / OR
             uploaded_file = st.file_uploader(
                 "📎 Attach File for DR / SI / OR (Photo or PDF)", 
-                type=["png", "jpg", "jpeg", "pdf"],
-                help="Supports photo uploads from mobile or desktop file attachment."
+                type=["png", "jpg", "jpeg", "pdf"]
             )
             
             if uploaded_file is not None and uploaded_file.type.startswith("image/"):
@@ -797,22 +696,18 @@ elif role == "Purchaser":
             
             if st.button("Confirm Receiving", type="primary"):
                 if dr_number.strip():
-                    from datetime import datetime
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    
                     po_details = pending_recv_df[pending_recv_df['PO Number'] == po_to_receive].iloc[0]
                     
                     receipt_blob = uploaded_file.getvalue() if uploaded_file else None
                     file_name = uploaded_file.name if uploaded_file else None
                     
-                    # 1. Insert into deliveries table
                     c.execute("""INSERT INTO deliveries 
                                  (pono, supplier, project_name, dr_number, total_amount, received_date, receipt_image, file_name) 
                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", 
                               (po_to_receive, po_details['Supplier'], po_details['Project'], dr_number.strip(), 
                                po_details['Total Amount'], current_time, receipt_blob, file_name))
                     
-                    # 2. Update requests status
                     c.execute("UPDATE requests SET received_status = 'Received', received_timestamp = ? WHERE pono = ?", 
                               (current_time, po_to_receive))
                     
@@ -824,9 +719,6 @@ elif role == "Purchaser":
         else:
             st.success("🎉 No pending deliveries! All approved POs have been physically received.")
 
-        # =========================================================
-        # HISTORY VIEWER: VIEW RECEIVED DELIVERIES & ATTACHMENTS
-        # =========================================================
         st.markdown("---")
         st.write("### 📜 Received Deliveries History & Attachment Viewer")
 
@@ -845,7 +737,6 @@ elif role == "Purchaser":
         """, conn)
 
         if not history_df.empty:
-            # Display history table
             st.dataframe(
                 history_df[["PO Number", "Supplier", "Project", "DR / SI / OR No.", "Total Amount", "Date Received", "File Name"]].style.format({"Total Amount": "₱{:,.2f}"}),
                 use_container_width=True,
@@ -853,8 +744,6 @@ elif role == "Purchaser":
             )
 
             st.write("#### 🔍 Select Item to View Attachment")
-            
-            # Map selectbox choices to record IDs
             options = {
                 f"PO #{row['PO Number']} | DR #{row['DR / SI / OR No.']} | {row['Supplier']} ({row['Project']})": row['id']
                 for _, row in history_df.iterrows()
@@ -863,39 +752,25 @@ elif role == "Purchaser":
             selected_label = st.selectbox("Choose a delivery record:", list(options.keys()))
             selected_id = options[selected_label]
 
-            # Fetch image blob for selected record
             selected_record = c.execute("SELECT receipt_image, file_name FROM deliveries WHERE id = ?", (selected_id,)).fetchone()
 
             if selected_record and selected_record[0]:
                 image_blob, fname = selected_record[0], selected_record[1]
-                
                 if fname and fname.lower().endswith(('.png', '.jpg', '.jpeg')):
                     st.image(image_blob, caption=f"📷 Attached Receipt: {fname}", width=450)
                 elif fname and fname.lower().endswith('.pdf'):
                     st.info(f"📄 PDF Document attached: **{fname}**")
-                    st.download_button(
-                        label="📥 Download PDF Document",
-                        data=image_blob,
-                        file_name=fname,
-                        mime="application/pdf"
-                    )
+                    st.download_button(label="📥 Download PDF Document", data=image_blob, file_name=fname, mime="application/pdf")
                 else:
                     try:
                         st.image(image_blob, caption=f"📷 Attached Receipt: {fname or 'Image'}", width=450)
                     except Exception:
-                        st.download_button(
-                            label=f"📥 Download Attached File ({fname or 'file'})",
-                            data=image_blob,
-                            file_name=fname or "receipt_file"
-                        )
+                        st.download_button(label=f"📥 Download Attached File ({fname or 'file'})", data=image_blob, file_name=fname or "receipt_file")
             else:
                 st.warning("⚠️ No image or document file was attached for this receiving record.")
         else:
             st.info("No received deliveries recorded yet.")
             
-    # =========================================================
-    # 5. APPROVED PURCHASE ORDERS
-    # =========================================================
     st.markdown("---")
     st.subheader("🖨️ Approved Purchase Orders (Ready for Printing)")
     
@@ -910,7 +785,6 @@ elif role == "Purchaser":
     if approved_pos and HAS_REPORTLAB:
         for idx, po in enumerate(approved_pos):
             pono, supplier, proj, app_time = po
-            
             col_info, col_btn = st.columns([3, 1])
             col_info.write(f"📄 **PO Number:** {pono} | **Supplier:** {supplier} | **Project:** {proj} | **Approved:** {app_time}")
             
@@ -926,17 +800,12 @@ elif role == "Purchaser":
             )
     elif not approved_pos:
         st.info("No approved purchase orders currently available for printing.")
-        
+
 # --- ROLE 3: APPROVER ---
 elif role == "Approver":
     st.subheader("✅ Approver Dashboard (Leizel Cabunilas)")
     
-    # -----------------------------------------
-    # 1. PENDING APPROVAL QUEUE
-    # -----------------------------------------
     st.subheader("⏳ Pending Approval Queue")
-    
-    # Query grouped by P.O. Number using 'Pending Approval'
     pending_pos = c.execute("""
         SELECT pono, supplier, project_name, MAX(timestamp) as req_time 
         FROM requests 
@@ -952,21 +821,17 @@ elif role == "Approver":
             pono, supplier, proj, req_time = po
             
             with st.expander(f"📄 PO #{pono} | Supplier: {supplier} | Project: {proj} | Submitted: {req_time}", expanded=True):
-                # Fetch items for this specific PO
                 po_items_df = pd.read_sql_query(
                     "SELECT item_no, description, qty, unit, price, amount FROM requests WHERE pono = ? AND status = 'Pending Approval'", 
                     conn, params=(pono,)
                 )
                 
                 st.dataframe(po_items_df, use_container_width=True, hide_index=True)
-                
-                # Show Grand Total
                 total_amount = po_items_df["amount"].sum()
                 st.markdown(f"### **Grand Total: ₱{total_amount:,.2f}**")
                 
                 col_app, col_rej, _ = st.columns([1, 1, 3])
                 
-                # Approve Action
                 if col_app.button("✅ Approve PO", key=f"app_{pono}", type="primary"):
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     c.execute("""
@@ -978,7 +843,6 @@ elif role == "Approver":
                     st.success(f"PO #{pono} has been approved successfully!")
                     st.rerun()
                 
-                # Reject Action
                 if col_rej.button("❌ Reject PO", key=f"rej_{pono}"):
                     c.execute("""
                         UPDATE requests 
@@ -990,10 +854,6 @@ elif role == "Approver":
                     st.rerun()
 
     st.markdown("---")
-    
-    # -----------------------------------------
-    # 2. APPROVED PURCHASE ORDERS (READY FOR PRINTING)
-    # -----------------------------------------
     st.subheader("🖨️ Approved Purchase Orders (Ready for Printing)")
     
     approved_pos = c.execute("""
@@ -1007,7 +867,6 @@ elif role == "Approver":
     if approved_pos and HAS_REPORTLAB:
         for idx, po in enumerate(approved_pos):
             pono, supplier, proj, app_time = po
-            
             col_info, col_btn = st.columns([3, 1])
             col_info.write(f"📄 **PO Number:** {pono} | **Supplier:** {supplier} | **Project:** {proj} | **Approved:** {app_time}")
             
@@ -1024,13 +883,11 @@ elif role == "Approver":
     elif not approved_pos:
         st.info("No approved purchase orders available for printing.")
 
-
 # --- ROLE 4: OFFICE MANAGER ---
 elif role == "Office Manager":
     st.subheader("📊 Office Manager Dashboard - Project Status & Expenses")
     st.write("### 📈 Real-Time Project Financial Monitoring")
     
-    # 1. Fetch Projects & Contract Amounts
     projects_df = pd.read_sql_query("""
         SELECT 
             p.id as 'No.', 
@@ -1041,7 +898,6 @@ elif role == "Office Manager":
         GROUP BY p.id, p.project_name
     """, conn)
     
-    # 2. Fetch Running Expenses (Only Approved or Received/Paid items)
     expenses_df = pd.read_sql_query("""
         SELECT 
             project_name, 
@@ -1052,39 +908,30 @@ elif role == "Office Manager":
         GROUP BY project_name, category
     """, conn)
     
-    # 3. Pivot expenses into columns grouped by project
     if not expenses_df.empty:
         pivot_exp = expenses_df.pivot_table(index='project_name', columns='category', values='cost', fill_value=0).reset_index()
     else:
-        pivot_exp = pd.DataFrame(columns=['project_name']) # Fallback if no expenses exist yet
+        pivot_exp = pd.DataFrame(columns=['project_name'])
         
-    # Merge projects with their expenses
     merged_df = pd.merge(projects_df, pivot_exp, left_on='Project Name', right_on='project_name', how='left').fillna(0)
     
-    # 4. Map your database categories to the specific spreadsheet columns
     merged_df['MATERIALS Amount'] = merged_df.get('Direct Materials', 0.0) + merged_df.get('Tools & Consumables', 0.0)
     merged_df['SUBCON'] = merged_df.get('Subcontract & Services', 0.0)
     merged_df['EQPT Amount'] = merged_df.get('Equipment & Rental', 0.0) + merged_df.get('Fuel & Lubricants', 0.0)
     
-    # Static or placeholder columns (can be updated later if you add these to the DB)
     merged_df['Labor Amount'] = 0.0  
     merged_df['ADMIN'] = 0.0
     merged_df['REVISED Amount'] = merged_df['CONTRACT Amount'] 
-    
-    # Calculate Implementing Budget (Using the 42% logic from your Admin tab)
     merged_df['Implementing Budget Amount'] = merged_df['CONTRACT Amount'] * 0.42 
     merged_df['Implementing Budget %'] = 0.42 
     
-    # Calculate Total Expenses
     merged_df['TOTAL Amount'] = (merged_df['MATERIALS Amount'] + merged_df['Labor Amount'] + 
                                  merged_df['ADMIN'] + merged_df['SUBCON'] + merged_df['EQPT Amount'])
     
-    # Calculate Percentages safely (avoiding dividing by zero)
     for col, target in [('MATERIALS Amount', 'Mat %'), ('Labor Amount', 'Lab %'), 
                         ('EQPT Amount', 'Eqpt %'), ('TOTAL Amount', 'Total %')]:
         merged_df[target] = (merged_df[col] / merged_df['Implementing Budget Amount']).replace([float('inf'), -float('inf')], 0.0).fillna(0.0)
         
-    # 5. Restructure to match the MultiIndex layout exactly
     final_columns = [
         'No.', 'Project Name', 'CONTRACT Amount', 'REVISED Amount',
         'Implementing Budget %', 'Implementing Budget Amount',
@@ -1092,14 +939,12 @@ elif role == "Office Manager":
         'Eqpt %', 'EQPT Amount', 'Total %', 'TOTAL Amount'
     ]
     
-    # Ensure all columns exist before rendering to prevent errors
     for col in final_columns:
         if col not in merged_df.columns:
             merged_df[col] = 0.0
             
     final_df = merged_df[final_columns]
     
-    # 6. Apply the MultiIndex (Double-Header) structure
     final_df.columns = pd.MultiIndex.from_tuples([
         ('Project Details', 'No.'),
         ('Project Details', 'Project Name'),
@@ -1119,7 +964,6 @@ elif role == "Office Manager":
         ('Running Expenses', 'TOTAL Amount')
     ])
     
-    # 7. Format currency and percentages visually
     styled_df = final_df.style.format({
         ('Project Details', 'CONTRACT Amount'): "₱{:,.2f}",
         ('Project Details', 'REVISED Amount'): "₱{:,.2f}",
@@ -1138,22 +982,16 @@ elif role == "Office Manager":
     })
     
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
-    
 
 # --- ROLE 5: ADMIN VIEW ALL ---
 elif role == "Admin View All":
     st.subheader("🛡️ Admin Dashboard & Analytics")
 
-    # Tabs to separate Admin Settings/Master View, Reporting, and Payables
     tab_settings, tab_reports, tab_payables = st.tabs(["⚙️ Master Database & Settings", "📊 Project Approved Reports", "💸 Accounts Payable"])
 
-    # ---------------------------------------------------------
-    # TAB 1: MASTER DATABASE & SETTINGS
-    # ---------------------------------------------------------
     with tab_settings:
         st.write("### ⚙️ Admin Settings & Configuration")
         
-        # Add New Project Expander
         with st.expander("➕ Add New Project"):
             new_proj = st.text_input("Project Name")
             if st.button("Save Project"):
@@ -1163,10 +1001,8 @@ elif role == "Admin View All":
                     st.success(f"Project '{new_proj}' added!")
                     st.rerun()
 
-        # --- Manage Project Activities Expander ---
         with st.expander("🏗️ Manage Project Activities"):
             st.write("#### 📝 Edit & Manage Project Activities")
-            
             projects_list = [p[0] for p in c.execute("SELECT project_name FROM projects").fetchall()]
             sel_proj_act = st.selectbox("Select Project for Activity", projects_list, key="sel_proj_editable")
             
@@ -1177,9 +1013,7 @@ elif role == "Admin View All":
                     
                     st.markdown("---")
                     st.write(f"#### 📋 Editable Activity List for: *{sel_proj_act}*")
-                    st.info("💡 You can edit the cells directly in the table below (Activity Name, Qty, Unit, Contract Amount). Click **Save Changes** when done.")
                     
-                    # Fetch activities for the editable grid
                     acts_df = pd.read_sql_query("""
                         SELECT 
                             id,
@@ -1193,7 +1027,6 @@ elif role == "Admin View All":
                     """, conn, params=(project_id,))
                     
                     if not acts_df.empty:
-                        # Use st.data_editor for inline editing with corrected number formats
                         edited_acts_df = st.data_editor(
                             acts_df,
                             use_container_width=True,
@@ -1201,24 +1034,13 @@ elif role == "Admin View All":
                             num_rows="dynamic",
                             column_config={
                                 "id": None,
-                                "Qty": st.column_config.NumberColumn(
-                                    "Qty", 
-                                    min_value=0.0, 
-                                    step=0.01, 
-                                    format="%.2f"
-                                ),
-                                "Contract Amount": st.column_config.NumberColumn(
-                                    "Contract Amount", 
-                                    min_value=0.0, 
-                                    step=100.0, 
-                                    format="₱%.2f"
-                                )
+                                "Qty": st.column_config.NumberColumn("Qty", min_value=0.0, step=0.01, format="%.2f"),
+                                "Contract Amount": st.column_config.NumberColumn("Contract Amount", min_value=0.0, step=100.0, format="₱%.2f")
                             }
                         )
                         
                         col_save, col_metric = st.columns([1, 2])
                         if col_save.button("💾 Save Table Changes", type="primary"):
-                            # 1. Update existing rows
                             for _, row in edited_acts_df.iterrows():
                                 act_id = row['id']
                                 act_name = row['Activity Name']
@@ -1233,10 +1055,8 @@ elif role == "Admin View All":
                                         WHERE id = ?
                                     """, (act_name, act_qty, act_unit, act_amt, act_id))
                             
-                            # 2. Delete removed rows
                             original_ids = acts_df['id'].dropna().tolist()
                             current_ids = edited_acts_df['id'].dropna().tolist()
-                            
                             deleted_ids = [old_id for old_id in original_ids if old_id not in current_ids]
                             for d_id in deleted_ids:
                                 c.execute("DELETE FROM activities WHERE id = ?", (d_id,))
@@ -1248,78 +1068,11 @@ elif role == "Admin View All":
                         acts_df['Implementing Amount'] = acts_df['Contract Amount'] * 0.42
                         total_contract = acts_df['Contract Amount'].sum()
                         total_implementing = acts_df['Implementing Amount'].sum()
-                        
                         col_metric.markdown(f"**Total Contract:** ₱{total_contract:,.2f} | **Total Implementing (42%):** ₱{total_implementing:,.2f}")
                     else:
-                        st.info("No activities registered yet for this project. Add one below.")
+                        st.info("No activities registered yet for this project.")
                     
                     st.markdown("---")
-                    
-                    # --- Expense Summary & Cost Tracking for Selected Project ---
-                    st.write(f"#### 📊 Actual Expense Tracking for: *{sel_proj_act}*")
-                    
-                    expenses_df = pd.read_sql_query("""
-                        SELECT 
-                            activity AS 'Activity Name',
-                            category AS 'Category',
-                            SUM(amount) AS 'Total Cost'
-                        FROM requests 
-                        WHERE project_name = ?
-                        GROUP BY activity, category
-                    """, conn, params=(sel_proj_act,))
-                    
-                    if not acts_df.empty:
-                        if not expenses_df.empty:
-                            expenses_df['Category'] = expenses_df['Category'].str.strip()
-                            
-                            pivot_expenses = expenses_df.pivot_table(
-                                index='Activity Name', 
-                                columns='Category', 
-                                values='Total Cost', 
-                                fill_value=0.0
-                            ).reset_index()
-                            
-                            tracking_df = pd.merge(
-                                acts_df[['Activity Name', 'Qty', 'Unit', 'Contract Amount']], 
-                                pivot_expenses, 
-                                on='Activity Name', 
-                                how='left'
-                            ).fillna(0.0)
-                        else:
-                            tracking_df = acts_df[['Activity Name', 'Qty', 'Unit', 'Contract Amount']].copy()
-                    
-                        for col in ['Direct Materials', 'Materials', 'Labor', 'Equipment & Rental', 'Equipment']:
-                            if col not in tracking_df.columns:
-                                tracking_df[col] = 0.0
-                    
-                        tracking_df['Actual Materials Amount'] = tracking_df.get('Direct Materials', 0.0) + tracking_df.get('Materials', 0.0)
-                        tracking_df['Labor Amount'] = tracking_df.get('Labor', 0.0)
-                        tracking_df['Equipment Amount'] = tracking_df.get('Equipment & Rental', 0.0) + tracking_df.get('Equipment', 0.0)
-                        
-                        tracking_df['Total Amount'] = (
-                            tracking_df['Actual Materials Amount'] + 
-                            tracking_df['Labor Amount'] + 
-                            tracking_df['Equipment Amount']
-                        )
-                        
-                        display_tracking_df = tracking_df[['Activity Name', 'Qty', 'Unit', 'Contract Amount', 'Actual Materials Amount', 'Labor Amount', 'Equipment Amount', 'Total Amount']]
-                        
-                        st.dataframe(
-                            display_tracking_df.style.format({
-                                "Qty": "{:,.2f}",
-                                "Contract Amount": "₱{:,.2f}",
-                                "Actual Materials Amount": "₱{:,.2f}",
-                                "Labor Amount": "₱{:,.2f}",
-                                "Equipment Amount": "₱{:,.2f}",
-                                "Total Amount": "₱{:,.2f}"
-                            }),
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                    
-                    st.markdown("---")
-                    
-                    # Quick Add New Activity Form
                     st.write("#### ➕ Add New Activity")
                     ac1, ac2, ac3, ac4 = st.columns([3, 1, 1, 2])
                     new_act = ac1.text_input("Activity Name / Description", key="new_act_name")
@@ -1339,11 +1092,8 @@ elif role == "Admin View All":
                         else:
                             st.warning("⚠️ Please provide an activity name.")      
 
-        # --- Manage Signatories & Signatures Expander ---
         with st.expander("✍️ Manage Signatories & Signatures"):
             st.write("#### ✒️ Edit Signatories & Signature Files")
-            st.info("Update the official document signatories and their signature file references.")
-            
             signatories_df = pd.read_sql_query("SELECT id, name, role, signature_path FROM signatories", conn)
             
             edited_sigs_df = st.data_editor(
@@ -1370,25 +1120,18 @@ elif role == "Admin View All":
                 st.success("Signatories updated successfully!")
                 st.rerun()
 
-        # --- Add New Material Item Expander ---
         with st.expander("📦 Add New Material Item"):
-            st.write("#### ➕ Register New Material / Item")
-            
             all_items = [r[0] for r in c.execute("SELECT item_no FROM materials").fetchall() if r[0] and r[0].isdigit()]
-            if all_items:
-                max_item_num = max([int(x) for x in all_items])
-                suggested_item_no = str(max_item_num + 1).zfill(5)
-            else:
-                suggested_item_no = "00001"
+            suggested_item_no = str(max([int(x) for x in all_items]) + 1).zfill(5) if all_items else "00001"
 
             mc1, mc2 = st.columns(2)
             mat_item_no = mc1.text_input("Item Number", value=suggested_item_no)
-            mat_desc = mc2.text_input("Description (e.g. PORTLAND CEMENT)")
+            mat_desc = mc2.text_input("Description")
             
             mc3, mc4 = st.columns(2)
-            mat_unit = mc3.text_input("Unit (e.g. BAGS, LENGTH, LOT)")
+            mat_unit = mc3.text_input("Unit", value="PCS")
             category_options = ["Direct Materials", "Equipment & Rental", "Tools & Consumables", "Fuel & Lubricants", "Subcontract & Services"]
-            mat_category = mc4.selectbox("Category (Accounting Tag)", category_options)
+            mat_category = mc4.selectbox("Category", category_options)
             
             if st.button("Save Material Item", type="primary"):
                 if mat_item_no.strip() and mat_desc.strip():
@@ -1401,59 +1144,25 @@ elif role == "Admin View All":
                             category = excluded.category
                     """, (mat_item_no.strip(), mat_desc.strip(), mat_unit.strip(), mat_category))
                     conn.commit()
-                    st.success(f"Item '{mat_desc}' ({mat_category}) saved successfully as #{mat_item_no.strip()}!")
+                    st.success(f"Item '{mat_desc}' saved successfully!")
                     st.rerun()
                 else:
                     st.warning("⚠️ Please fill in both Item Number and Description.")
-            
-            st.markdown("---")
-            st.write("#### 📋 Registered Materials & Items List")
-            materials_df = pd.read_sql_query(
-                """SELECT 
-                    item_no AS 'Item No', 
-                    description AS 'Description', 
-                    unit AS 'Unit', 
-                    COALESCE(category, 'Direct Materials') AS 'Category'
-                   FROM materials
-                   ORDER BY item_no ASC""", 
-                conn
-            )
-            st.dataframe(materials_df, use_container_width=True, hide_index=True) 
 
-        # --- Add & Manage Suppliers Expander ---
         with st.expander("🚚 Add & Manage Suppliers"):
-            st.write("#### ✏️ Edit or Register Supplier")
-            
             suppliers_list = [s[0] for s in c.execute("SELECT supplier_name FROM suppliers ORDER BY supplier_name ASC").fetchall()]
             supplier_edit_options = ["-- Register New Supplier --"] + suppliers_list
+            selected_supplier_to_edit = st.selectbox("Select Supplier to Edit", supplier_edit_options)
             
-            selected_supplier_to_edit = st.selectbox("Select Supplier to Edit (or choose to add new)", supplier_edit_options)
-            
-            edit_name = ""
-            edit_loc = ""
-            edit_contact_person = ""
-            edit_contact_no = ""
-            edit_tin = ""
-            edit_vat = "VAT Registered"
-            edit_terms = 0
+            edit_name, edit_loc, edit_contact_person, edit_contact_no, edit_tin, edit_vat, edit_terms = "", "", "", "", "", "VAT Registered", 0
             
             if selected_supplier_to_edit != "-- Register New Supplier --":
-                sup_data = c.execute("""
-                    SELECT supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days 
-                    FROM suppliers WHERE supplier_name = ?
-                """, (selected_supplier_to_edit,)).fetchone()
-                
+                sup_data = c.execute("SELECT supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days FROM suppliers WHERE supplier_name = ?", (selected_supplier_to_edit,)).fetchone()
                 if sup_data:
-                    edit_name = sup_data[0]
-                    edit_loc = sup_data[1] if sup_data[1] else ""
-                    edit_contact_person = sup_data[2] if sup_data[2] else ""
-                    edit_contact_no = sup_data[3] if sup_data[3] else ""
-                    edit_tin = sup_data[4] if sup_data[4] else ""
-                    edit_vat = sup_data[5] if sup_data[5] in ["VAT Registered", "Non-VAT"] else "VAT Registered"
-                    edit_terms = int(sup_data[6]) if sup_data[6] is not None else 0
+                    edit_name, edit_loc, edit_contact_person, edit_contact_no, edit_tin, edit_vat, edit_terms = sup_data[0], sup_data[1] or "", sup_data[2] or "", sup_data[3] or "", sup_data[4] or "", sup_data[5] or "VAT Registered", int(sup_data[6] or 0)
 
             sc1, sc2 = st.columns(2)
-            sup_name = sc1.text_input("Supplier Name", value=edit_name, help="If editing, keep name exact or type a new name to create.")
+            sup_name = sc1.text_input("Supplier Name", value=edit_name)
             sup_location = sc2.text_input("Location / Address", value=edit_loc)
             
             sc3, sc4 = st.columns(2)
@@ -1461,12 +1170,9 @@ elif role == "Admin View All":
             sup_contact_number = sc4.text_input("Contact Number", value=edit_contact_no)
             
             sc5, sc6 = st.columns(2)
-            sup_tin = sc5.text_input("TIN Number (e.g., 000-000-000-000)", value=edit_tin)
-            
-            vat_index = 0 if edit_vat == "VAT Registered" else 1
-            sup_vat = sc6.selectbox("VAT Status", ["VAT Registered", "Non-VAT"], index=vat_index)
-            
-            sup_terms = st.number_input("Payment Terms (Days)", min_value=0, value=edit_terms, step=1, help="0 means Cash on Delivery")
+            sup_tin = sc5.text_input("TIN Number", value=edit_tin)
+            sup_vat = sc6.selectbox("VAT Status", ["VAT Registered", "Non-VAT"], index=0 if edit_vat == "VAT Registered" else 1)
+            sup_terms = st.number_input("Payment Terms (Days)", min_value=0, value=edit_terms, step=1)
             
             btn_label = "Update Supplier Details" if selected_supplier_to_edit != "-- Register New Supplier --" else "Save New Supplier"
             
@@ -1488,63 +1194,23 @@ elif role == "Admin View All":
                     st.rerun()
                 else:
                     st.warning("⚠️ Please enter a Supplier Name.")
-            
-            st.markdown("---")
-            st.write("#### 📋 Registered Suppliers List")
-            suppliers_df = pd.read_sql_query(
-                """SELECT 
-                    supplier_name AS 'Supplier Name', 
-                    location AS 'Location / Address', 
-                    contact_person AS 'Contact Person', 
-                    contact_number AS 'Contact Number',
-                    tin_number AS 'TIN Number',
-                    vat_type AS 'VAT Status',
-                    terms_days AS 'Terms (Days)'
-                   FROM suppliers""", 
-                conn
-            )
-            st.dataframe(suppliers_df, use_container_width=True, hide_index=True)
 
-        # Master Landing Page Data Table
         st.write("### 📊 Complete Master Landing Page")
-        master_df = pd.read_sql_query("SELECT * FROM requests ORDER BY id DESC", conn)
-        st.dataframe(master_df, use_container_width=True, hide_index=True)
+        st.dataframe(pd.read_sql_query("SELECT * FROM requests ORDER BY id DESC", conn), use_container_width=True, hide_index=True)
 
-        # --- DANGER ZONE: RESET DATA ---
         st.markdown("---")
         st.write("### 🚨 Danger Zone: Database Management")
-        
         with st.expander("🗑️ Reset Test Data (Clear Transactions)"):
-            st.warning("⚠️ **WARNING:** This action will permanently delete all transaction history (Requests, P.O.s, and Deliveries). Your master data (Projects, Suppliers, Materials, Activities) will be kept safe.")
-            
-            confirm_reset = st.radio(
-                "Are you sure you want to clear all transactions?", 
-                ("No, keep my data", "Yes, delete transactions")
-            )
-            
-            if confirm_reset == "Yes, delete transactions":
-                st.error("❗ You have selected to delete all transactions. Click the button below to execute.")
-                
+            if st.radio("Are you sure you want to clear all transactions?", ("No, keep my data", "Yes, delete transactions")) == "Yes, delete transactions":
                 if st.button("🗑️ Confirm and Clear Data", type="primary"):
                     c.execute("DELETE FROM requests")
                     c.execute("DELETE FROM deliveries")
-                    
-                    try:
-                        c.execute("DELETE FROM sqlite_sequence WHERE name='requests'")
-                        c.execute("DELETE FROM sqlite_sequence WHERE name='deliveries'")
-                    except sqlite3.OperationalError:
-                        pass 
-                    
                     conn.commit()
-                    st.success("✅ All test transactions have been successfully cleared!")
+                    st.success("✅ All test transactions cleared!")
                     st.rerun()
 
-    # ---------------------------------------------------------
-    # TAB 2: PROJECT APPROVED REPORTS & SUPPLIER SUMMARY
-    # ---------------------------------------------------------
     with tab_reports:
         st.write("### 📈 Approved Items & Summary Reports")
-
         projects_query = "SELECT DISTINCT project_name FROM requests WHERE status = 'Approved / Ongoing' AND project_name IS NOT NULL AND project_name != ''"
         suppliers_query = "SELECT DISTINCT supplier FROM requests WHERE status = 'Approved / Ongoing' AND supplier IS NOT NULL AND supplier != ''"
         
@@ -1556,31 +1222,19 @@ elif role == "Admin View All":
         selected_supplier = col_f2.selectbox("🚚 Filter by Supplier:", available_suppliers)
 
         base_query = """
-            SELECT 
-                pono AS 'P.O. Number',
-                project_name AS 'Project Name',
-                supplier AS 'Supplier',
-                item_no AS 'Item No',
-                description AS 'Description',
-                activity AS 'Activity',
-                qty AS 'Qty',
-                unit AS 'Unit',
-                price AS 'Unit Price',
-                amount AS 'Total Amount',
-                approved_timestamp AS 'Approved Date'
-            FROM requests 
-            WHERE status = 'Approved / Ongoing'
+            SELECT pono AS 'P.O. Number', project_name AS 'Project Name', supplier AS 'Supplier',
+                   item_no AS 'Item No', description AS 'Description', activity AS 'Activity',
+                   qty AS 'Qty', unit AS 'Unit', price AS 'Unit Price', amount AS 'Total Amount',
+                   approved_timestamp AS 'Approved Date'
+            FROM requests WHERE status = 'Approved / Ongoing'
         """
         params = []
-
         if selected_project != "All Projects":
             base_query += " AND project_name = ?"
             params.append(selected_project)
-
         if selected_supplier != "All Suppliers":
             base_query += " AND supplier = ?"
             params.append(selected_supplier)
-
         base_query += " ORDER BY id DESC"
 
         approved_df = pd.read_sql_query(base_query, conn, params=params)
@@ -1588,92 +1242,36 @@ elif role == "Admin View All":
         if approved_df.empty:
             st.warning("No approved items found matching the selected filters.")
         else:
-            total_spent = approved_df["Total Amount"].sum()
-            total_qty = approved_df["Qty"].sum()
-            total_pos = approved_df["P.O. Number"].nunique()
-
             m1, m2, m3 = st.columns(3)
-            m1.metric("💰 Total Approved Cost", f"₱{total_spent:,.2f}")
-            m2.metric("📦 Total Approved Quantity", f"{total_qty:,.0f} units")
-            m3.metric("📄 Total Approved P.O.s", f"{total_pos} Orders")
+            m1.metric("💰 Total Approved Cost", f"₱{approved_df['Total Amount'].sum():,.2f}")
+            m2.metric("📦 Total Approved Quantity", f"{approved_df['Qty'].sum():,.0f} units")
+            m3.metric("📄 Total Approved P.O.s", f"{approved_df['P.O. Number'].nunique()} Orders")
 
             st.markdown("---")
+            st.dataframe(approved_df.style.format({"Unit Price": "₱{:,.2f}", "Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
 
-            st.write("#### 📄 Detailed Approved Items List")
-            st.dataframe(
-                approved_df.style.format({
-                    "Unit Price": "₱{:,.2f}",
-                    "Total Amount": "₱{:,.2f}"
-                }),
-                use_container_width=True,
-                hide_index=True
-            )
-
-            st.markdown("---")
-
-            st.write("#### 📊 Consolidated Material Totals")
-            
-            aggregated_df = approved_df.groupby(["Item No", "Description", "Unit"]).agg(
-                Total_Approved_Qty=('Qty', 'sum'),
-                Total_Approved_Amount=('Total Amount', 'sum')
-            ).reset_index().rename(columns={
-                "Total_Approved_Qty": "Total Approved Quantity",
-                "Total_Approved_Amount": "Total Spent (₱)"
-            })
-
-            st.dataframe(
-                aggregated_df.style.format({
-                    "Total Approved Quantity": "{:,.2f}",
-                    "Total Spent (₱)": "₱{:,.2f}"
-                }),
-                use_container_width=True,
-                hide_index=True
-            )
-
-    # ---------------------------------------------------------
-    # TAB 3: ACCOUNTS PAYABLE & DUE DATES
-    # ---------------------------------------------------------
     with tab_payables:
         st.write("### 💸 Accounts Payable (A/P) Monitor")
-        st.info("This view only shows official deliveries. Due dates are strictly calculated from the actual Receiving Date.")
-        
-        ap_query = """
-            SELECT 
-                d.pono AS 'PO Number',
-                d.dr_number AS 'DR Number',
-                d.supplier AS 'Supplier',
-                d.project_name AS 'Project',
-                d.total_amount AS 'Total Amount',
-                d.received_date AS 'Date Received',
-                s.terms_days AS 'Terms (Days)',
-                d.payment_status AS 'Status'
+        ap_df = pd.read_sql_query("""
+            SELECT d.pono AS 'PO Number', d.dr_number AS 'DR Number', d.supplier AS 'Supplier',
+                   d.project_name AS 'Project', d.total_amount AS 'Total Amount', d.received_date AS 'Date Received',
+                   s.terms_days AS 'Terms (Days)', d.payment_status AS 'Status'
             FROM deliveries d
             LEFT JOIN suppliers s ON d.supplier = s.supplier_name
             WHERE d.payment_status = 'Unpaid'
             ORDER BY d.received_date ASC
-        """
-        ap_df = pd.read_sql_query(ap_query, conn)
+        """, conn)
         
         if not ap_df.empty:
             ap_df['Date Received'] = pd.to_datetime(ap_df['Date Received'])
             ap_df['Terms (Days)'] = ap_df['Terms (Days)'].fillna(0).astype(int)
-            
-            ap_df['Due Date'] = ap_df['Date Received'] + pd.to_timedelta(ap_df['Terms (Days)'], unit='D')
-            
+            ap_df['Due Date'] = (ap_df['Date Received'] + pd.to_timedelta(ap_df['Terms (Days)'], unit='D')).dt.strftime('%Y-%m-%d')
             ap_df['Date Received'] = ap_df['Date Received'].dt.strftime('%Y-%m-%d')
-            ap_df['Due Date'] = ap_df['Due Date'].dt.strftime('%Y-%m-%d')
             
-            st.dataframe(
-                ap_df.style.format({"Total Amount": "₱{:,.2f}"}), 
-                use_container_width=True, 
-                hide_index=True
-            )
-            
-            total_unpaid = ap_df['Total Amount'].sum()
-            st.error(f"**Total Outstanding Payables:** ₱ {total_unpaid:,.2f}")
+            st.dataframe(ap_df.style.format({"Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
+            st.error(f"**Total Outstanding Payables:** ₱ {ap_df['Total Amount'].sum():,.2f}")
             
             st.markdown("---")
-            st.write("#### ✅ Mark Delivery as Paid")
             col_pay1, col_pay2 = st.columns([2, 1])
             dr_to_pay = col_pay1.selectbox("Select DR Number to mark as Paid", ap_df['DR Number'].tolist())
             
