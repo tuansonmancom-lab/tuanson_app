@@ -26,14 +26,13 @@ auth_token = st.secrets["turso"]["auth_token"]
 
 
 def init_db():
-  conn = libsql.connect(database=url, auth_token=auth_token)
-  c = conn.cursor()
+    conn = libsql.connect(database=url, auth_token=auth_token)
+    c = conn.cursor()
     # 1. Projects Master Table
-    c.execute('''CREATE TABLE IF NOT EXISTS projects (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_name TEXT UNIQUE)''')
-    
-    # 2. Activities Master Table (Updated to include qty, unit, and contract_amount)
+    c.execute("""CREATE TABLE IF NOT EXISTS projects (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 project_name TEXT UNIQUE)""")
+# 2. Activities Master Table (Updated to include qty, unit, and contract_amount)
     c.execute('''CREATE TABLE IF NOT EXISTS activities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER,
