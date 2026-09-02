@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 from io import BytesIO  # <--- Ensure this line is included
+import sqlite3
 
 # ReportLab imports (if using ReportLab)
 # --- REPORTLAB PDF GENERATION LIBRARIES ---
@@ -32,7 +33,7 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS projects (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  project_name TEXT UNIQUE)""")
-# 2. Activities Master Table (Updated to include qty, unit, and contract_amount)
+    # 2. Activities Master Table (Updated to include qty, unit, and contract_amount)
     c.execute('''CREATE TABLE IF NOT EXISTS activities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER,
@@ -114,8 +115,7 @@ def init_db():
         try:
             c.execute(f"ALTER TABLE suppliers ADD COLUMN {col} TEXT")
         except Exception:
-    pass
-        pass
+            pass
 
     # Safe column addition for requests table category
     try:
@@ -236,13 +236,7 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
 
     # --- SAFELY FETCH SIGNATORIES VIA INDEPENDENT CONCURRENT CONNECTION ---
     try:
-        # Open an independent database context manager to prevent multi-user locking issues
-        with sqlite3.connect("inventory.db") as pdf_conn:
-            # Apply your safe secret formula optimizations locally
-            pdf_conn.execute("PRAGMA journal_mode = WAL;")
-            pdf_conn.execute("PRAGMA synchronous = NORMAL;")
-            pdf_conn.execute("PRAGMA busy_timeout = 5000;")
-            
+        with libsql.connect(database=url, auth_token=auth_token) as pdf_conn:
             cursor = pdf_conn.cursor()
             cursor.execute("SELECT name, role, signature_path FROM signatories")
             sigs = cursor.fetchall()
@@ -494,11 +488,9 @@ st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 role = st.sidebar.selectbox("🔑 Select Your Role (Trial Mode)", 
                             ["Requisitor", "Purchaser", "Approver", "Office Manager", "Admin View All"])
 
-conn = sqlite3.connect(DB_NAME)
+conn = libsql.connect(database=url, auth_token=auth_token)
 c = conn.cursor()
 
-# --- ROLE 1: REQUISITOR ---
-# --- ROLE 1: REQUISITOR ---
 # --- ROLE 1: REQUISITOR ---
 if role == "Requisitor":
     st.subheader("📋 New Material Request Form")
@@ -600,7 +592,6 @@ if role == "Requisitor":
             st.rerun()
 
 
-# --- ROLE 2: PURCHASER ---
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
     st.subheader("🛒 Purchaser Dashboard")
@@ -792,10 +783,6 @@ elif role == "Purchaser":
             recv_col1, recv_col2 = st.columns(2)
             po_to_receive = recv_col1.selectbox("Select PO Number", pending_recv_df['PO Number'].tolist())
             dr_number = recv_col2.text_input("DR / SI / OR Document Number", help="Enter Delivery Receipt, Sales Invoice, or Official Receipt Number")
-            
-           
-
-
             
             # File Upload Section for DR / SI / OR
             uploaded_file = st.file_uploader(
@@ -1152,7 +1139,6 @@ elif role == "Office Manager":
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
     
 
-# --- ROLE 5: ADMIN VIEW ALL ---
 # --- ROLE 5: ADMIN VIEW ALL ---
 elif role == "Admin View All":
     st.subheader("🛡️ Admin Dashboard & Analytics")
