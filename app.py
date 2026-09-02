@@ -1,4 +1,4 @@
-import sqlite3
+import libsql
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -11,23 +11,23 @@ try:
     from reportlab.lib import colors
     from reportlab.lib.units import inch
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle # <--- ParagraphStyle added here
+    from reportlab.lib.styles import (
+        getSampleStyleSheet,
+        ParagraphStyle,
+    )  # <--- ParagraphStyle added here
+
     HAS_REPORTLAB = True
 except ImportError:
     HAS_REPORTLAB = False
-    
-# --- DATABASE SETUP ---
-# --- DATABASE SETUP ---
-DB_NAME = "inventory.db"
+
+# --- DATABASE SETUP (TURSO CLOUD) ---
+url = st.secrets["turso"]["database_url"]
+auth_token = st.secrets["turso"]["auth_token"]
+
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    c.execute("PRAGMA journal_mode = WAL;")
-    c.execute("PRAGMA synchronous = NORMAL;")
-    c.execute("PRAGMA busy_timeout = 5000;")
-
+  conn = libsql.connect(database=url, auth_token=auth_token)
+  c = conn.cursor()
     # 1. Projects Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
