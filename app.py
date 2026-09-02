@@ -113,13 +113,8 @@ def init_db():
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
         try:
             c.execute(f"ALTER TABLE suppliers ADD COLUMN {col} TEXT")
-        except sqlite3.OperationalError:
-            pass
-
-    # Safe column addition for materials table category
-    try:
-        c.execute("ALTER TABLE materials ADD COLUMN category TEXT DEFAULT 'Direct Materials'")
-    except sqlite3.OperationalError:
+        except Exception:
+    pass
         pass
 
     # Safe column addition for requests table category
