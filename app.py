@@ -119,9 +119,10 @@ def init_db():
 
     # Safe column addition for requests table category
     try:
-        c.execute("ALTER TABLE requests ADD COLUMN category TEXT DEFAULT 'Direct Materials'")
-    except sqlite3.OperationalError:
-        pass
+    c.execute("ALTER TABLE requests ADD COLUMN category TEXT DEFAULT 'Direct M'")
+except sqlite3.OperationalError:
+    # The column already exists, so we can safely ignore this error
+    pass
 
     # Safe column additions for Payables Monitoring
     try:
