@@ -98,7 +98,12 @@ def init_db():
                 received_date DATETIME,
                 payment_status TEXT DEFAULT 'Unpaid',
                 receipt_image BLOB,
-                file_name TEXT)''')
+                file_name TEXT,
+                apv_number TEXT,
+                apv_date DATETIME,
+                cv_number TEXT,
+                cv_date DATETIME,
+                payment_method TEXT)''')
 
     # 7. Signatories Master Table
     c.execute('''
@@ -127,6 +132,21 @@ def init_db():
         )
     ''')
 
+    # 9. General Ledger / Journal Entries Table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS journal_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_date DATETIME,
+            voucher_no TEXT,
+            account_code TEXT,
+            account_name TEXT,
+            debit REAL DEFAULT 0.0,
+            credit REAL DEFAULT 0.0,
+            ref_no TEXT,
+            description TEXT
+        )
+    ''')
+
     # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
         try:
@@ -147,6 +167,11 @@ def init_db():
         ("activities", "unit", "TEXT DEFAULT 'lot'"),
         ("deliveries", "receipt_image", "BLOB"),
         ("deliveries", "file_name", "TEXT"),
+        ("deliveries", "apv_number", "TEXT"),
+        ("deliveries", "apv_date", "DATETIME"),
+        ("deliveries", "cv_number", "TEXT"),
+        ("deliveries", "cv_date", "DATETIME"),
+        ("deliveries", "payment_method", "TEXT"),
         ("users", "can_add_act", "TEXT DEFAULT 'No'"),
         ("users", "can_add_item", "TEXT DEFAULT 'No'")
     ]:
@@ -205,8 +230,9 @@ def init_db():
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", [
             ('Vergel', '1234', 'Purchaser', '', '', '', '', 'Active'),
             ('Glance', '5641', 'Requisitor', 'Purchaser', '', 'Office Manager', 'Admin View All', 'Active'),
-            ('Brazel', '12181', 'Requisitor', 'Purchaser', 'Approver', 'Office Manager', 'Admin View All', 'Active'),
+            ('Brazel', '12181', 'Requisitor', 'Purchaser', 'Approver', 'Office Manager', 'Accounting', 'Active'),
             ('Leizel', '5874', '', '', 'Approver', 'Office Manager', '', 'Active'),
+            ('AccountingUser', '1234', 'Accounting', '', '', '', '', 'Active'),
             ('Admin', 'admin', 'Admin View All', '', '', '', '', 'Active') 
         ])
 
@@ -214,6 +240,19 @@ def init_db():
     conn.close()
 
 init_db()
+
+# --- SEQUENCE GENERATOR HELPER FUNCTION ---
+def generate_voucher_number(cursor, column_name, prefix):
+    query = f"SELECT {column_name} FROM deliveries WHERE {column_name} IS NOT NULL AND {column_name} LIKE '{prefix}-%' ORDER BY id DESC LIMIT 1"
+    last_voucher = cursor.execute(query).fetchone()
+    
+    if last_voucher and last_voucher[0]:
+        match = re.search(r'(\d+)$', last_voucher[0])
+        if match:
+            number_str = match.group(1)
+            next_number = str(int(number_str) + 1).zfill(len(number_str))
+            return f"{prefix}-{next_number}"
+    return f"{prefix}-00001"
 
 # --- PDF GENERATOR FUNCTION ---
 def create_po_pdf(pono, date_str, supplier, project, po_items):
@@ -1153,7 +1192,175 @@ elif role == "Office Manager":
     
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
-# --- ROLE 5: ADMIN VIEW ALL ---
+# --- ROLE 5: ACCOUNTING ---
+elif role == "Accounting":
+    st.subheader("🧾 Accounting Dashboard - Payables & Disbursements")
+    
+    tab_apv, tab_payment, tab_gl = st.tabs(["📝 Accounts Payable Voucher (APV)", "💸 Check / Payment Voucher (CV)", "📖 General Ledger Entries"])
+    
+    # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
+    with tab_apv:
+        st.write("### 📦 Received Deliveries Awaiting APV Generation")
+        st.info("Receiving tab logs received items. Generate APV here to record Accounts Payable in the General Ledger.")
+        
+        apv_df = pd.read_sql_query("""
+            SELECT id, pono AS 'PO Number', dr_number AS 'DR Number', supplier AS 'Supplier', 
+                   project_name AS 'Project', total_amount AS 'Total Amount', received_date AS 'Date Received'
+            FROM deliveries 
+            WHERE payment_status = 'Unpaid' AND (apv_number IS NULL OR apv_number = '')
+            ORDER BY received_date ASC
+        """, conn)
+        
+        if not apv_df.empty:
+            st.dataframe(apv_df.style.format({"Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            st.write("#### 📑 Generate APV Document")
+            col1, col2 = st.columns(2)
+            
+            dr_to_apv = col1.selectbox("Select DR Number to Voucher", apv_df['DR Number'].tolist())
+            suggested_apv = generate_voucher_number(c, "apv_number", "APV")
+            apv_input = col2.text_input("APV Number Sequence", value=suggested_apv)
+            
+            st.info("""
+            💡 **Accounting Entry Preview:**
+            * **Debit:** Construction Materials (Code 13100) / Direct Cost Materials (Code 60200)
+            * **Credit:** Accounts Payable-Trade (Code 20100)
+            """)
+            
+            if st.button("✅ Generate Accounts Payable Voucher", type="primary"):
+                if apv_input.strip():
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    selected_del = apv_df[apv_df['DR Number'] == dr_to_apv].iloc[0]
+                    total_amt = float(selected_del['Total Amount'])
+                    
+                    c.execute("""
+                        UPDATE deliveries 
+                        SET apv_number = ?, apv_date = ? 
+                        WHERE dr_number = ?
+                    """, (apv_input.strip(), current_time, dr_to_apv))
+                    
+                    # Post Debit/Credit Journal Entry
+                    c.execute("""
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
+                        VALUES (?, ?, '13100', 'Construction Materials', ?, 0.0, ?, ?)
+                    """, (current_time, apv_input.strip(), total_amt, dr_to_apv, f"APV setup for DR #{dr_to_apv} ({selected_del['Supplier']})"))
+                    
+                    c.execute("""
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
+                        VALUES (?, ?, '20100', 'Accounts Payable-Trade', 0.0, ?, ?, ?)
+                    """, (current_time, apv_input.strip(), total_amt, dr_to_apv, f"APV liability accrued for DR #{dr_to_apv}"))
+                    
+                    conn.commit()
+                    st.success(f"🎉 Voucher {apv_input.strip()} recorded successfully for DR #{dr_to_apv}!")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Please enter a valid APV Number.")
+        else:
+            st.success("🎉 All received deliveries have been vouchered with an APV!")
+
+    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
+    with tab_payment:
+        st.write("### 💳 Outstanding Payables with Approved APV")
+        st.info("Process payments for vouchered liabilities via Cash or Check.")
+        
+        pay_df = pd.read_sql_query("""
+            SELECT id, apv_number AS 'APV Number', pono AS 'PO Number', dr_number AS 'DR Number', 
+                   supplier AS 'Supplier', total_amount AS 'Total Amount', apv_date AS 'APV Date'
+            FROM deliveries 
+            WHERE payment_status = 'Unpaid' AND apv_number IS NOT NULL AND apv_number != ''
+            ORDER BY apv_date ASC
+        """, conn)
+        
+        if not pay_df.empty:
+            st.dataframe(pay_df.style.format({"Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            st.write("#### 💸 Process Payment & Generate Check Voucher")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            apv_to_pay = col1.selectbox("Select APV Number to Pay", pay_df['APV Number'].tolist())
+            pay_method = col2.selectbox("Payment Method", ["Check", "Cash"])
+            
+            bank_accounts = [
+                ("10310", "Cash in Bank MBTC"),
+                ("10320", "Cash in Bank CHINA"),
+                ("10330", "Cash in Bank BDO"),
+                ("10340", "Cash in Bank Landbank"),
+                ("10100", "Cash on Hand")
+            ]
+            
+            bank_choice = st.selectbox("Select Funding Cash/Bank Account", [f"[{b[0]}] {b[1]}" for b in bank_accounts])
+            selected_bank_code = bank_choice.split("]")[0].replace("[", "")
+            selected_bank_name = bank_choice.split("]")[1].strip()
+            
+            prefix = "CV" if pay_method == "Check" else "CAV"
+            suggested_cv = generate_voucher_number(c, "cv_number", prefix)
+            cv_input = col3.text_input("Voucher Number Sequence", value=suggested_cv)
+            
+            st.info(f"""
+            💡 **Accounting Entry Preview:**
+            * **Debit:** Accounts Payable-Trade (Code 20100)
+            * **Credit:** {selected_bank_name} (Code {selected_bank_code})
+            """)
+            
+            if st.button("✅ Process Payment & Issue Voucher", type="primary"):
+                if cv_input.strip():
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    selected_pay = pay_df[pay_df['APV Number'] == apv_to_pay].iloc[0]
+                    pay_amt = float(selected_pay['Total Amount'])
+                    
+                    c.execute("""
+                        UPDATE deliveries 
+                        SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?
+                        WHERE apv_number = ?
+                    """, (cv_input.strip(), current_time, pay_method, apv_to_pay))
+                    
+                    c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_pay['PO Number'],))
+                    
+                    # Post Debit/Credit Journal Entry
+                    c.execute("""
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
+                        VALUES (?, ?, '20100', 'Accounts Payable-Trade', ?, 0.0, ?, ?)
+                    """, (current_time, cv_input.strip(), pay_amt, apv_to_pay, f"Settlement of APV #{apv_to_pay} ({selected_pay['Supplier']})"))
+                    
+                    c.execute("""
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
+                        VALUES (?, ?, ?, ?, 0.0, ?, ?, ?)
+                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, pay_amt, apv_to_pay, f"Payment release via {pay_method}"))
+                    
+                    conn.commit()
+                    st.success(f"🎉 Voucher {cv_input.strip()} completed! Payment cleared for APV #{apv_to_pay}.")
+                    st.rerun()
+                else:
+                    st.error("⚠️ Please enter a valid Check Voucher Number.")
+        else:
+            st.success("🎉 No outstanding vouchered payables waiting for payment!")
+
+    # --- TAB 3: GENERAL LEDGER ---
+    with tab_gl:
+        st.write("### 📖 Real-Time General Ledger Journal Entries")
+        gl_df = pd.read_sql_query("""
+            SELECT id AS 'Entry ID', entry_date AS 'Date', voucher_no AS 'Voucher No', 
+                   account_code AS 'Account Code', account_name AS 'Account Name', 
+                   debit AS 'Debit', credit AS 'Credit', ref_no AS 'Ref Doc', description AS 'Description'
+            FROM journal_entries
+            ORDER BY id DESC
+        """, conn)
+        
+        if not gl_df.empty:
+            st.dataframe(gl_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
+            
+            d_sum = gl_df["Debit"].sum()
+            c_sum = gl_df["Credit"].sum()
+            st.write(f"**Total Debits:** ₱{d_sum:,.2f} | **Total Credits:** ₱{c_sum:,.2f}")
+        else:
+            st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
+
+# --- ROLE 6: ADMIN VIEW ALL ---
 elif role == "Admin View All":
     st.subheader("🛡️ Admin Dashboard & Analytics")
 
@@ -1166,7 +1373,7 @@ elif role == "Admin View All":
             st.write("#### 👤 Add, Edit, or Remove Users")
             users_df = pd.read_sql_query("SELECT id, username, password, role1, role2, role3, role4, role5, status, can_add_act, can_add_item FROM users", conn)
             
-            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Admin View All"]
+            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Accounting", "Admin View All"]
             yes_no_options = ["Yes", "No"]
             
             edited_users = st.data_editor(
@@ -1427,6 +1634,7 @@ elif role == "Admin View All":
                 if st.button("🗑️ Confirm and Clear Data", type="primary"):
                     c.execute("DELETE FROM requests")
                     c.execute("DELETE FROM deliveries")
+                    c.execute("DELETE FROM journal_entries")
                     conn.commit()
                     st.success("✅ All test transactions cleared!")
                     st.rerun()
@@ -1477,7 +1685,8 @@ elif role == "Admin View All":
         ap_df = pd.read_sql_query("""
             SELECT d.pono AS 'PO Number', d.dr_number AS 'DR Number', d.supplier AS 'Supplier',
                    d.project_name AS 'Project', d.total_amount AS 'Total Amount', d.received_date AS 'Date Received',
-                   s.terms_days AS 'Terms (Days)', d.payment_status AS 'Status'
+                   s.terms_days AS 'Terms (Days)', d.payment_status AS 'Status',
+                   d.apv_number AS 'APV No', d.cv_number AS 'CV No'
             FROM deliveries d
             LEFT JOIN suppliers s ON d.supplier = s.supplier_name
             WHERE d.payment_status = 'Unpaid'
@@ -1497,7 +1706,7 @@ elif role == "Admin View All":
             col_pay1, col_pay2 = st.columns([2, 1])
             dr_to_pay = col_pay1.selectbox("Select DR Number to mark as Paid", ap_df['DR Number'].tolist())
             
-            if col_pay2.button("Confirm Payment", type="primary"):
+            if col_pay2.button("Confirm Direct Settlement", type="primary"):
                 c.execute("UPDATE deliveries SET payment_status = 'Paid' WHERE dr_number = ?", (dr_to_pay,))
                 conn.commit()
                 st.success(f"DR #{dr_to_pay} marked as paid successfully!")
