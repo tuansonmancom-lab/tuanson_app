@@ -1,6 +1,7 @@
 import sqlite3
 import pandas as pd
 import streamlit as st
+import re
 from datetime import datetime
 from io import BytesIO
 
@@ -598,7 +599,6 @@ if role == "Requisitor":
                 
                 for item in st.session_state.request_cart:
                     amount = item["Qty"] * item["Price"]
-                    # Insert the request and store the logged-in user as the 'requester_name'
                     c.execute("""INSERT INTO requests 
                                  (timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, email_address, status, supplier, requester_name)
                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Purchaser', ?, ?)""",
@@ -654,8 +654,15 @@ elif role == "Purchaser":
         last_po = last_po_result[0] if last_po_result else None
         suggested_po = ""
         
-        if last_po and last_po.isdigit():
-            suggested_po = str(int(last_po) + 1).zfill(len(last_po))
+        if last_po:
+            match = re.search(r'(\d+)$', last_po)
+            if match:
+                number_str = match.group(1)
+                prefix = last_po[:match.start()]
+                next_number = str(int(number_str) + 1).zfill(len(number_str))
+                suggested_po = f"{prefix}{next_number}"
+            else:
+                suggested_po = f"{last_po}-1"
         
         if pending_df.empty:
             st.info("No pending requests waiting for Purchasing.")
