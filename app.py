@@ -491,14 +491,13 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.current_user = user_data[1] 
                 
-                # Extract non-empty roles from columns role1 to role5 (indexes 3 to 7)
                 raw_roles = user_data[3:8]
                 roles = [r for r in raw_roles if r and str(r).strip() != ""]
                 st.session_state.available_roles = roles
                 st.rerun()
             else:
                 st.error("Invalid Username/Password or Account is Inactive.")
-    st.stop() # Halts the script here if not logged in
+    st.stop()
 
 # --- IF LOGGED IN: SHOW MAIN APP ---
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
@@ -533,16 +532,34 @@ if role == "Requisitor":
         projects = [r[0] for r in c.execute("SELECT project_name FROM projects").fetchall()]
         selected_project = col_proj.selectbox("Project Name", projects)
         
+        # --- DYNAMIC ACTIVITY SELECTION WITH ADD OPTION ---
         act_query = """SELECT a.activity_name FROM activities a 
                        JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
         activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
-        selected_activity = col_act.selectbox("Activity", activities if activities else ["N/A"])
+        activity_options = activities + ["➕ Add New Activity..."]
+        selected_activity_option = col_act.selectbox("Activity", activity_options)
         
+        selected_activity = selected_activity_option
+        if selected_activity_option == "➕ Add New Activity...":
+            new_activity_input = st.text_input("Enter New Activity Name")
+            selected_activity = new_activity_input.strip()
+
+        # --- DYNAMIC MATERIAL SELECTION WITH ADD OPTION ---
         materials = c.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
-        mat_options = {f"[{m[0]}] {m[1]}": (m[0], m[1], m[2], m[3]) for m in materials} if materials else {"No materials": ("00000", "N/A", "PCS", "Direct Materials")}
+        mat_options = {f"[{m[0]}] {m[1]}": (m[0], m[1], m[2], m[3]) for m in materials} if materials else {}
+        mat_label_options = list(mat_options.keys()) + ["➕ Add New Item..."]
         
-        selected_mat_label = st.selectbox("Select Item", list(mat_options.keys()))
-        item_no, description, default_unit, default_category = mat_options[selected_mat_label]
+        selected_mat_label = st.selectbox("Select Item", mat_label_options)
+        
+        if selected_mat_label == "➕ Add New Item...":
+            st.info("💡 Registering a new item for this request:")
+            col_ni1, col_ni2 = st.columns(2)
+            item_no = col_ni1.text_input("New Item Number (e.g., 00007 or custom code)")
+            description = col_ni2.text_input("Item Description")
+            default_unit = "PCS"
+            default_category = "Direct Materials"
+        else:
+            item_no, description, default_unit, default_category = mat_options[selected_mat_label]
         
         suppliers = [r[0] for r in c.execute("SELECT supplier_name FROM suppliers").fetchall()]
         supplier_options = ["No Preference"] + suppliers
@@ -565,19 +582,45 @@ if role == "Requisitor":
             add_to_list = st.form_submit_button("➕ Add to Temporary List")
             
             if add_to_list:
-                st.session_state.request_cart.append({
-                    "Project": selected_project,
-                    "Activity": selected_activity,
-                    "Item No": item_no,
-                    "Description": description,
-                    "Category": category,
-                    "Qty": qty,
-                    "Unit": unit,
-                    "Price": price,
-                    "supplier": suggested_supplier,
-                    "Email": email
-                })
-                st.success(f"Added {qty} {unit} of {description} ({category}) to your list!")
+                if selected_activity_option == "➕ Add New Activity..." and not selected_activity:
+                    st.error("⚠️ Please type a valid name for the new activity.")
+                elif selected_mat_label == "➕ Add New Item..." and (not item_no.strip() or not description.strip()):
+                    st.error("⚠️ Please provide both a valid Item Number and Description for the new item.")
+                else:
+                    if selected_activity_option == "➕ Add New Activity...":
+                        proj_id_row = c.execute("SELECT id FROM projects WHERE project_name = ?", (selected_project,)).fetchone()
+                        if proj_id_row:
+                            c.execute("""
+                                INSERT OR IGNORE INTO activities (project_id, activity_name, qty, unit, contract_amount) 
+                                VALUES (?, ?, 1.0, ?, 0.0)
+                            """, (proj_id_row[0], selected_activity, unit))
+                            conn.commit()
+
+                    if selected_mat_label == "➕ Add New Item...":
+                        c.execute("""
+                            INSERT INTO materials (item_no, description, unit, category)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT(item_no) DO UPDATE SET
+                                description = excluded.description,
+                                unit = excluded.unit,
+                                category = excluded.category
+                        """, (item_no.strip(), description.strip(), unit.strip(), category))
+                        conn.commit()
+
+                    st.session_state.request_cart.append({
+                        "Project": selected_project,
+                        "Activity": selected_activity,
+                        "Item No": item_no.strip(),
+                        "Description": description.strip(),
+                        "Category": category,
+                        "Qty": qty,
+                        "Unit": unit,
+                        "Price": price,
+                        "supplier": suggested_supplier,
+                        "Email": email
+                    })
+                    st.success(f"Added {qty} {unit} of {description} to your list!")
+                    st.rerun()
 
         if len(st.session_state.request_cart) > 0:
             st.markdown("---")
