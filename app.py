@@ -113,6 +113,21 @@ def init_db():
         )
     ''')
 
+    # 8. Users Master Table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT,
+            role1 TEXT,
+            role2 TEXT,
+            role3 TEXT,
+            role4 TEXT,
+            role5 TEXT,
+            status TEXT DEFAULT 'Active'
+        )
+    ''')
+
     # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
         try:
@@ -179,6 +194,18 @@ def init_db():
         c.executemany("INSERT INTO signatories (name, role, signature_path) VALUES (?, ?, ?)", [
             ('BRAZEL M. DELA CERNA', 'Preparer', ''),
             ('LEIZEL A. CABUNILAS', 'Approver', 'Leizel_signature.png')
+        ])
+
+    c.execute("SELECT COUNT(*) FROM users")
+    if c.fetchone()[0] == 0:
+        c.executemany("""INSERT INTO users 
+            (username, password, role1, role2, role3, role4, role5, status) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", [
+            ('Vergel', '1234', 'Purchaser', '', '', '', '', 'Active'),
+            ('Glance', '5641', 'Requisitor', 'Purchaser', '', 'Office Manager', 'Admin View All', 'Active'),
+            ('Brazel', '12181', 'Requisitor', 'Purchaser', 'Approver', 'Office Manager', 'Admin View All', 'Active'),
+            ('Leizel', '5874', '', '', 'Approver', 'Office Manager', '', 'Active'),
+            ('Admin', 'admin', 'Admin View All', '', '', '', '', 'Active') 
         ])
 
     conn.commit()
@@ -440,16 +467,58 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     buffer.seek(0)
     return buffer.getvalue()
 
-# --- APP LAYOUT ---
+# --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
-st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
-role = st.sidebar.selectbox("🔑 Select Your Role (Trial Mode)", 
-                            ["Requisitor", "Purchaser", "Approver", "Office Manager", "Admin View All"])
-
-# Cloud Connection Management (check_same_thread=False prevents threading exceptions in Streamlit)
+# Cloud Connection Management
 conn = sqlite3.connect(DB_NAME, check_same_thread=False)
 c = conn.cursor()
+
+# --- LOGIN SYSTEM ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.current_user = ""
+    st.session_state.available_roles = []
+
+if not st.session_state.logged_in:
+    st.title("🔒 Tuanson Construction - Login")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit_btn = st.form_submit_button("Login")
+
+        if submit_btn:
+            user_data = c.execute("SELECT * FROM users WHERE username=? AND password=? AND status='Active'", (username, password)).fetchone()
+            if user_data:
+                st.session_state.logged_in = True
+                st.session_state.current_user = user_data[1] 
+                
+                # Extract non-empty roles from columns role1 to role5 (indexes 3 to 7)
+                raw_roles = user_data[3:8]
+                roles = [r for r in raw_roles if r and str(r).strip() != ""]
+                st.session_state.available_roles = roles
+                st.rerun()
+            else:
+                st.error("Invalid Username/Password or Account is Inactive.")
+    st.stop() # Halts the script here if not logged in
+
+# --- IF LOGGED IN: SHOW MAIN APP ---
+st.title("🏗️ Tuanson Construction - Procurement & Inventory")
+
+st.sidebar.write(f"👤 **Logged in as:** {st.session_state.current_user}")
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.logged_in = False
+    st.session_state.current_user = ""
+    st.session_state.available_roles = []
+    st.rerun()
+
+st.sidebar.markdown("---")
+
+if not st.session_state.available_roles:
+    st.warning("You have no roles assigned. Please contact the Admin.")
+    st.stop()
+    
+role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.available_roles)
 
 # --- ROLE 1: REQUISITOR ---
 if role == "Requisitor":
@@ -992,6 +1061,53 @@ elif role == "Admin View All":
     with tab_settings:
         st.write("### ⚙️ Admin Settings & Configuration")
         
+        with st.expander("👥 Manage System Users"):
+            st.write("#### 👤 Add, Edit, or Remove Users")
+            users_df = pd.read_sql_query("SELECT id, username, password, role1, role2, role3, role4, role5, status FROM users", conn)
+            
+            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Admin View All"]
+            
+            edited_users = st.data_editor(
+                users_df,
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "id": None, 
+                    "username": st.column_config.TextColumn("Username", required=True),
+                    "password": st.column_config.TextColumn("Password", required=True),
+                    "role1": st.column_config.SelectboxColumn("Role 1", options=role_options),
+                    "role2": st.column_config.SelectboxColumn("Role 2", options=role_options),
+                    "role3": st.column_config.SelectboxColumn("Role 3", options=role_options),
+                    "role4": st.column_config.SelectboxColumn("Role 4", options=role_options),
+                    "role5": st.column_config.SelectboxColumn("Role 5", options=role_options),
+                    "status": st.column_config.SelectboxColumn("Status", options=["Active", "Inactive"], default="Active")
+                }
+            )
+            
+            if st.button("💾 Save User Changes", type="primary"):
+                c.execute("DELETE FROM users")
+                for _, row in edited_users.iterrows():
+                    if pd.notnull(row['username']) and str(row['username']).strip() != "":
+                        
+                        r1 = str(row.get('role1', '')) if pd.notnull(row.get('role1')) else ''
+                        r2 = str(row.get('role2', '')) if pd.notnull(row.get('role2')) else ''
+                        r3 = str(row.get('role3', '')) if pd.notnull(row.get('role3')) else ''
+                        r4 = str(row.get('role4', '')) if pd.notnull(row.get('role4')) else ''
+                        r5 = str(row.get('role5', '')) if pd.notnull(row.get('role5')) else ''
+                        status = str(row.get('status', 'Active')) if pd.notnull(row.get('status')) else 'Active'
+                        
+                        c.execute("""
+                            INSERT INTO users (username, password, role1, role2, role3, role4, role5, status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            str(row['username']), str(row['password']), 
+                            r1, r2, r3, r4, r5, status
+                        ))
+                conn.commit()
+                st.success("User database updated successfully!")
+                st.rerun()
+
         with st.expander("➕ Add New Project"):
             new_proj = st.text_input("Project Name")
             if st.button("Save Project"):
