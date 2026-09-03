@@ -147,6 +147,16 @@ def init_db():
         )
     ''')
 
+    # 10. Chart of Accounts Table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS chart_of_accounts (
+            account_code TEXT PRIMARY KEY,
+            account_name TEXT NOT NULL,
+            account_type TEXT NOT NULL,
+            status TEXT DEFAULT 'Active'
+        )
+    ''')
+
     # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
         try:
@@ -234,6 +244,19 @@ def init_db():
             ('Leizel', '5874', '', '', 'Approver', 'Office Manager', '', 'Active'),
             ('AccountingUser', '1234', 'Accounting', '', '', '', '', 'Active'),
             ('Admin', 'admin', 'Admin View All', '', '', '', '', 'Active') 
+        ])
+
+    c.execute("SELECT COUNT(*) FROM chart_of_accounts")
+    if c.fetchone()[0] == 0:
+        c.executemany("INSERT INTO chart_of_accounts (account_code, account_name, account_type) VALUES (?, ?, ?)", [
+            ('10100', 'Cash on Hand', 'Asset'),
+            ('10310', 'Cash in Bank MBTC', 'Asset'),
+            ('10320', 'Cash in Bank CHINA', 'Asset'),
+            ('10330', 'Cash in Bank BDO', 'Asset'),
+            ('10340', 'Cash in Bank Landbank', 'Asset'),
+            ('13100', 'Construction Materials', 'Asset'),
+            ('20100', 'Accounts Payable-Trade', 'Liability'),
+            ('60200', 'Direct Cost Materials', 'Expense')
         ])
 
     conn.commit()
@@ -1196,8 +1219,53 @@ elif role == "Office Manager":
 elif role == "Accounting":
     st.subheader("🧾 Accounting Dashboard - Payables & Disbursements")
     
-    tab_apv, tab_payment, tab_gl = st.tabs(["📝 Accounts Payable Voucher (APV)", "💸 Check / Payment Voucher (CV)", "📖 General Ledger Entries"])
+    tab_coa, tab_apv, tab_payment, tab_gl = st.tabs([
+        "📊 Chart of Accounts", 
+        "📝 Accounts Payable Voucher (APV)", 
+        "💸 Check / Payment Voucher (CV)", 
+        "📖 General Ledger Entries"
+    ])
     
+    # --- TAB 0: CHART OF ACCOUNTS ---
+    with tab_coa:
+        st.subheader("📊 Manage Chart of Accounts")
+        st.info("View, add, or manage financial account codes used across General Ledger postings and vouchers.")
+        
+        with st.expander("➕ Add New Account Code"):
+            with st.form("add_coa_form", clear_on_submit=True):
+                col1, col2, col3 = st.columns(3)
+                new_acc_code = col1.text_input("Account Code (e.g., 10500)")
+                new_acc_name = col2.text_input("Account Name (e.g., Accounts Receivable)")
+                new_acc_type = col3.selectbox("Account Type", ["Asset", "Liability", "Equity", "Revenue", "Expense"])
+                
+                submitted_coa = st.form_submit_button("Save Account Code", type="primary")
+                if submitted_coa:
+                    if new_acc_code.strip() and new_acc_name.strip():
+                        try:
+                            c.execute("""
+                                INSERT INTO chart_of_accounts (account_code, account_name, account_type)
+                                VALUES (?, ?, ?)
+                            """, (new_acc_code.strip(), new_acc_name.strip(), new_acc_type))
+                            conn.commit()
+                            st.success(f"Account {new_acc_code.strip()} - {new_acc_name.strip()} added successfully!")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.error(f"⚠️ Account Code '{new_acc_code.strip()}' already exists.")
+                    else:
+                        st.warning("⚠️ Please provide both an Account Code and Account Name.")
+
+        df_coa = pd.read_sql_query("""
+            SELECT account_code AS 'Account Code', account_name AS 'Account Name', 
+                   account_type AS 'Account Type', status AS 'Status'
+            FROM chart_of_accounts
+            ORDER BY account_code ASC
+        """, conn)
+        
+        if not df_coa.empty:
+            st.dataframe(df_coa, use_container_width=True, hide_index=True)
+        else:
+            st.info("No accounts found in the Chart of Accounts.")
+
     # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
     with tab_apv:
         st.write("### 📦 Received Deliveries Awaiting APV Generation")
