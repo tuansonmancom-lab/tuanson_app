@@ -115,7 +115,7 @@ def init_db():
         )
     ''')
 
-    # 8. Users Master Table
+    # 8. Users Master Table (Updated to include role6)
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,6 +126,7 @@ def init_db():
             role3 TEXT,
             role4 TEXT,
             role5 TEXT,
+            role6 TEXT,
             status TEXT DEFAULT 'Active',
             can_add_act TEXT DEFAULT 'No',
             can_add_item TEXT DEFAULT 'No'
@@ -183,7 +184,8 @@ def init_db():
         ("deliveries", "cv_date", "DATETIME"),
         ("deliveries", "payment_method", "TEXT"),
         ("users", "can_add_act", "TEXT DEFAULT 'No'"),
-        ("users", "can_add_item", "TEXT DEFAULT 'No'")
+        ("users", "can_add_item", "TEXT DEFAULT 'No'"),
+        ("users", "role6", "TEXT DEFAULT ''")
     ]:
         try:
             c.execute(f"ALTER TABLE {col_sql[0]} ADD COLUMN {col_sql[1]} {col_sql[2]}")
@@ -236,14 +238,14 @@ def init_db():
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
         c.executemany("""INSERT INTO users 
-            (username, password, role1, role2, role3, role4, role5, status) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", [
-            ('Vergel', '1234', 'Purchaser', '', '', '', '', 'Active'),
-            ('Glance', '5641', 'Requisitor', 'Purchaser', '', 'Office Manager', 'Admin View All', 'Active'),
-            ('Brazel', '12181', 'Requisitor', 'Purchaser', 'Approver', 'Office Manager', 'Accounting', 'Active'),
-            ('Leizel', '5874', '', '', 'Approver', 'Office Manager', '', 'Active'),
-            ('AccountingUser', '1234', 'Accounting', '', '', '', '', 'Active'),
-            ('Admin', 'admin', 'Admin View All', '', '', '', '', 'Active') 
+            (username, password, role1, role2, role3, role4, role5, role6, status) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", [
+            ('Vergel', '1234', 'Purchaser', '', '', '', '', '', 'Active'),
+            ('Glance', '5641', 'Requisitor', 'Purchaser', '', 'Office Manager', 'Admin View All', '', 'Active'),
+            ('Brazel', '12181', 'Requisitor', 'Purchaser', 'Approver', 'Office Manager', 'Admin View All', 'Accounting', 'Active'),
+            ('Leizel', '5874', '', '', 'Approver', 'Office Manager', '', '', 'Active'),
+            ('AccountingUser', '1234', 'Accounting', '', '', '', '', '', 'Active'),
+            ('Admin', 'admin', 'Admin View All', '', '', '', '', '', 'Active') 
         ])
 
     c.execute("SELECT COUNT(*) FROM chart_of_accounts")
@@ -554,17 +556,17 @@ if not st.session_state.logged_in:
         submit_btn = st.form_submit_button("Login")
 
         if submit_btn:
-            user_data = c.execute("SELECT id, username, password, role1, role2, role3, role4, role5, status, can_add_act, can_add_item FROM users WHERE username=? AND password=? AND status='Active'", (username, password)).fetchone()
+            user_data = c.execute("SELECT id, username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users WHERE username=? AND password=? AND status='Active'", (username, password)).fetchone()
             if user_data:
                 st.session_state.logged_in = True
                 st.session_state.current_user = user_data[1] 
                 
-                raw_roles = user_data[3:8]
+                raw_roles = user_data[3:9]
                 roles = [r for r in raw_roles if r and str(r).strip() != ""]
                 st.session_state.available_roles = roles
                 
-                st.session_state.can_add_act = user_data[9]
-                st.session_state.can_add_item = user_data[10]
+                st.session_state.can_add_act = user_data[10]
+                st.session_state.can_add_item = user_data[11]
                 st.rerun()
             else:
                 st.error("Invalid Username/Password or Account is Inactive.")
@@ -1439,7 +1441,7 @@ elif role == "Admin View All":
         
         with st.expander("👥 Manage System Users"):
             st.write("#### 👤 Add, Edit, or Remove Users")
-            users_df = pd.read_sql_query("SELECT id, username, password, role1, role2, role3, role4, role5, status, can_add_act, can_add_item FROM users", conn)
+            users_df = pd.read_sql_query("SELECT id, username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users", conn)
             
             role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Accounting", "Admin View All"]
             yes_no_options = ["Yes", "No"]
@@ -1458,6 +1460,7 @@ elif role == "Admin View All":
                     "role3": st.column_config.SelectboxColumn("Role 3", options=role_options),
                     "role4": st.column_config.SelectboxColumn("Role 4", options=role_options),
                     "role5": st.column_config.SelectboxColumn("Role 5", options=role_options),
+                    "role6": st.column_config.SelectboxColumn("Role 6", options=role_options),
                     "status": st.column_config.SelectboxColumn("Status", options=["Active", "Inactive"], default="Active"),
                     "can_add_act": st.column_config.SelectboxColumn("Can Add Act?", options=yes_no_options, default="No"),
                     "can_add_item": st.column_config.SelectboxColumn("Can Add Item?", options=yes_no_options, default="No")
@@ -1474,16 +1477,17 @@ elif role == "Admin View All":
                         r3 = str(row.get('role3', '')) if pd.notnull(row.get('role3')) else ''
                         r4 = str(row.get('role4', '')) if pd.notnull(row.get('role4')) else ''
                         r5 = str(row.get('role5', '')) if pd.notnull(row.get('role5')) else ''
+                        r6 = str(row.get('role6', '')) if pd.notnull(row.get('role6')) else ''
                         status = str(row.get('status', 'Active')) if pd.notnull(row.get('status')) else 'Active'
                         can_add_act = str(row.get('can_add_act', 'No')) if pd.notnull(row.get('can_add_act')) else 'No'
                         can_add_item = str(row.get('can_add_item', 'No')) if pd.notnull(row.get('can_add_item')) else 'No'
                         
                         c.execute("""
-                            INSERT INTO users (username, password, role1, role2, role3, role4, role5, status, can_add_act, can_add_item)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO users (username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             str(row['username']), str(row['password']), 
-                            r1, r2, r3, r4, r5, status, can_add_act, can_add_item
+                            r1, r2, r3, r4, r5, r6, status, can_add_act, can_add_item
                         ))
                 conn.commit()
                 st.success("User database updated successfully!")
