@@ -16,17 +16,12 @@ except ImportError:
     HAS_REPORTLAB = False
     
 # --- DATABASE SETUP (Cloud-Optimized) ---
-# Note: In cloud environments (like Streamlit Community Cloud), local SQLite files are ephemeral 
-# and will reset on app reboot/redeploy unless connected to a persistent volume or external DB.
 DB_NAME = "inventory.db"
 
 def init_db():
-    # check_same_thread=False is crucial for multi-threaded cloud web servers like Streamlit
     conn = sqlite3.connect(DB_NAME, check_same_thread=False)
     c = conn.cursor()
     
-    # WAL mode can sometimes behave unpredictably on certain cloud container network filesystems,
-    # but works well with standard local disk persistence. Wrapped in try/except for cloud safety.
     try:
         c.execute("PRAGMA journal_mode = WAL;")
         c.execute("PRAGMA synchronous = NORMAL;")
@@ -88,7 +83,8 @@ def init_db():
                 approved_timestamp DATETIME,
                 payment_status TEXT DEFAULT 'Unpaid',
                 received_status TEXT DEFAULT 'Pending',
-                received_timestamp DATETIME)''')
+                received_timestamp DATETIME,
+                requester_name TEXT)''')
 
     # 6. Deliveries / Receiving Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS deliveries (
@@ -142,6 +138,7 @@ def init_db():
         ("requests", "payment_status", "TEXT DEFAULT 'Unpaid'"),
         ("requests", "received_status", "TEXT DEFAULT 'Pending'"),
         ("requests", "received_timestamp", "DATETIME"),
+        ("requests", "requester_name", "TEXT"),
         ("activities", "contract_amount", "REAL DEFAULT 0.0"),
         ("activities", "qty", "REAL DEFAULT 1.0"),
         ("activities", "unit", "TEXT DEFAULT 'lot'"),
@@ -522,92 +519,120 @@ role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.ava
 
 # --- ROLE 1: REQUISITOR ---
 if role == "Requisitor":
-    st.subheader("📋 New Material Request Form")
+    st.subheader(f"📋 Requisitor Dashboard - {st.session_state.current_user}")
     
-    if "request_cart" not in st.session_state:
-        st.session_state.request_cart = []
+    tab_request, tab_track = st.tabs(["📝 New Material Request", "🔍 Track My Requests"])
     
-    col_proj, col_act = st.columns(2)
-    
-    projects = [r[0] for r in c.execute("SELECT project_name FROM projects").fetchall()]
-    selected_project = col_proj.selectbox("Project Name", projects)
-    
-    act_query = """SELECT a.activity_name FROM activities a 
-                   JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
-    activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
-    selected_activity = col_act.selectbox("Activity", activities if activities else ["N/A"])
-    
-    materials = c.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
-    mat_options = {f"[{m[0]}] {m[1]}": (m[0], m[1], m[2], m[3]) for m in materials} if materials else {"No materials": ("00000", "N/A", "PCS", "Direct Materials")}
-    
-    selected_mat_label = st.selectbox("Select Item", list(mat_options.keys()))
-    item_no, description, default_unit, default_category = mat_options[selected_mat_label]
-    
-    suppliers = [r[0] for r in c.execute("SELECT supplier_name FROM suppliers").fetchall()]
-    supplier_options = ["No Preference"] + suppliers
+    with tab_request:
+        if "request_cart" not in st.session_state:
+            st.session_state.request_cart = []
+        
+        col_proj, col_act = st.columns(2)
+        
+        projects = [r[0] for r in c.execute("SELECT project_name FROM projects").fetchall()]
+        selected_project = col_proj.selectbox("Project Name", projects)
+        
+        act_query = """SELECT a.activity_name FROM activities a 
+                       JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
+        activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
+        selected_activity = col_act.selectbox("Activity", activities if activities else ["N/A"])
+        
+        materials = c.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
+        mat_options = {f"[{m[0]}] {m[1]}": (m[0], m[1], m[2], m[3]) for m in materials} if materials else {"No materials": ("00000", "N/A", "PCS", "Direct Materials")}
+        
+        selected_mat_label = st.selectbox("Select Item", list(mat_options.keys()))
+        item_no, description, default_unit, default_category = mat_options[selected_mat_label]
+        
+        suppliers = [r[0] for r in c.execute("SELECT supplier_name FROM suppliers").fetchall()]
+        supplier_options = ["No Preference"] + suppliers
 
-    with st.form("request_form"):
-        category_options = ["Direct Materials", "Equipment & Rental", "Tools & Consumables", "Fuel & Lubricants", "Subcontract & Services"]
-        cat_index = category_options.index(default_category) if default_category in category_options else 0
-        
-        col_cat, col_unit = st.columns(2)
-        category = col_cat.selectbox("Category (Accounting Tag)", category_options, index=cat_index)
-        unit = col_unit.text_input("Unit", value=default_unit)
-        
-        col1, col2, col3 = st.columns([1, 1, 1.5])
-        qty = col1.number_input("Quantity", min_value=1.0, step=1.0)
-        price = col2.number_input("Estimated Price (Optional)", min_value=0.0, step=10.0)
-        suggested_supplier = col3.selectbox("Suggested Supplier (Optional)", supplier_options, index=0)
-        
-        email = st.text_input("Requester Email", value="requester@tuanson.com")
-        
-        add_to_list = st.form_submit_button("➕ Add to Temporary List")
-        
-        if add_to_list:
-            st.session_state.request_cart.append({
-                "Project": selected_project,
-                "Activity": selected_activity,
-                "Item No": item_no,
-                "Description": description,
-                "Category": category,
-                "Qty": qty,
-                "Unit": unit,
-                "Price": price,
-                "supplier": suggested_supplier,
-                "Email": email
-            })
-            st.success(f"Added {qty} {unit} of {description} ({category}) to your list!")
+        with st.form("request_form"):
+            category_options = ["Direct Materials", "Equipment & Rental", "Tools & Consumables", "Fuel & Lubricants", "Subcontract & Services"]
+            cat_index = category_options.index(default_category) if default_category in category_options else 0
+            
+            col_cat, col_unit = st.columns(2)
+            category = col_cat.selectbox("Category (Accounting Tag)", category_options, index=cat_index)
+            unit = col_unit.text_input("Unit", value=default_unit)
+            
+            col1, col2, col3 = st.columns([1, 1, 1.5])
+            qty = col1.number_input("Quantity", min_value=1.0, step=1.0)
+            price = col2.number_input("Estimated Price (Optional)", min_value=0.0, step=10.0)
+            suggested_supplier = col3.selectbox("Suggested Supplier (Optional)", supplier_options, index=0)
+            
+            email = st.text_input("Requester Email", value="requester@tuanson.com")
+            
+            add_to_list = st.form_submit_button("➕ Add to Temporary List")
+            
+            if add_to_list:
+                st.session_state.request_cart.append({
+                    "Project": selected_project,
+                    "Activity": selected_activity,
+                    "Item No": item_no,
+                    "Description": description,
+                    "Category": category,
+                    "Qty": qty,
+                    "Unit": unit,
+                    "Price": price,
+                    "supplier": suggested_supplier,
+                    "Email": email
+                })
+                st.success(f"Added {qty} {unit} of {description} ({category}) to your list!")
 
-    if len(st.session_state.request_cart) > 0:
-        st.markdown("---")
-        st.subheader("🛒 Review & Edit Temporary List")
-        st.info("💡 You can edit quantities, change categories, or delete rows before finalizing.")
-        
-        cart_df = pd.DataFrame(st.session_state.request_cart)
-        edited_cart_df = st.data_editor(
-            cart_df, 
-            num_rows="dynamic",
-            use_container_width=True,
-            key="cart_editor"
-        )
-        
-        st.session_state.request_cart = edited_cart_df.to_dict('records')
-        
-        if st.button("🚀 Submit All Requests to Purchasing"):
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if len(st.session_state.request_cart) > 0:
+            st.markdown("---")
+            st.subheader("🛒 Review & Edit Temporary List")
+            st.info("💡 You can edit quantities, change categories, or delete rows before finalizing.")
             
-            for item in st.session_state.request_cart:
-                amount = item["Qty"] * item["Price"]
-                c.execute("""INSERT INTO requests 
-                             (timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, email_address, status, supplier)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Purchaser', ?)""",
-                          (now, item["Project"], item["Activity"], item["Item No"], item["Description"], 
-                           item["Category"], item["Qty"], item["Unit"], item["Price"], amount, item["Email"], item["supplier"]))
+            cart_df = pd.DataFrame(st.session_state.request_cart)
+            edited_cart_df = st.data_editor(
+                cart_df, 
+                num_rows="dynamic",
+                use_container_width=True,
+                key="cart_editor"
+            )
             
-            conn.commit()
-            st.session_state.request_cart = [] 
-            st.success("All items successfully submitted to Purchasing!")
-            st.rerun()
+            st.session_state.request_cart = edited_cart_df.to_dict('records')
+            
+            if st.button("🚀 Submit All Requests to Purchasing"):
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                for item in st.session_state.request_cart:
+                    amount = item["Qty"] * item["Price"]
+                    # Insert the request and store the logged-in user as the 'requester_name'
+                    c.execute("""INSERT INTO requests 
+                                 (timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, email_address, status, supplier, requester_name)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Purchaser', ?, ?)""",
+                              (now, item["Project"], item["Activity"], item["Item No"], item["Description"], 
+                               item["Category"], item["Qty"], item["Unit"], item["Price"], amount, item["Email"], item["supplier"], st.session_state.current_user))
+                
+                conn.commit()
+                st.session_state.request_cart = [] 
+                st.success("All items successfully submitted to Purchasing!")
+                st.rerun()
+
+    with tab_track:
+        st.write(f"### 🔍 Request History for {st.session_state.current_user}")
+        st.info("Track the live status of all your submitted material requests here.")
+        
+        history_df = pd.read_sql_query("""
+            SELECT 
+                timestamp AS 'Date Submitted',
+                project_name AS 'Project',
+                description AS 'Item Description',
+                qty AS 'Qty',
+                unit AS 'Unit',
+                status AS 'Purchasing/Approval Status',
+                pono AS 'P.O. Number',
+                received_status AS 'Delivery Status'
+            FROM requests
+            WHERE requester_name = ?
+            ORDER BY timestamp DESC
+        """, conn, params=(st.session_state.current_user,))
+        
+        if not history_df.empty:
+            st.dataframe(history_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("You haven't submitted any material requests yet.")
 
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
