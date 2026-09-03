@@ -121,7 +121,9 @@ def init_db():
             role3 TEXT,
             role4 TEXT,
             role5 TEXT,
-            status TEXT DEFAULT 'Active'
+            status TEXT DEFAULT 'Active',
+            can_add_act TEXT DEFAULT 'No',
+            can_add_item TEXT DEFAULT 'No'
         )
     ''')
 
@@ -144,7 +146,9 @@ def init_db():
         ("activities", "qty", "REAL DEFAULT 1.0"),
         ("activities", "unit", "TEXT DEFAULT 'lot'"),
         ("deliveries", "receipt_image", "BLOB"),
-        ("deliveries", "file_name", "TEXT")
+        ("deliveries", "file_name", "TEXT"),
+        ("users", "can_add_act", "TEXT DEFAULT 'No'"),
+        ("users", "can_add_item", "TEXT DEFAULT 'No'")
     ]:
         try:
             c.execute(f"ALTER TABLE {col_sql[0]} ADD COLUMN {col_sql[1]} {col_sql[2]}")
@@ -477,6 +481,8 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.current_user = ""
     st.session_state.available_roles = []
+    st.session_state.can_add_act = "No"
+    st.session_state.can_add_item = "No"
 
 if not st.session_state.logged_in:
     st.title("🔒 Tuanson Construction - Login")
@@ -486,7 +492,7 @@ if not st.session_state.logged_in:
         submit_btn = st.form_submit_button("Login")
 
         if submit_btn:
-            user_data = c.execute("SELECT * FROM users WHERE username=? AND password=? AND status='Active'", (username, password)).fetchone()
+            user_data = c.execute("SELECT id, username, password, role1, role2, role3, role4, role5, status, can_add_act, can_add_item FROM users WHERE username=? AND password=? AND status='Active'", (username, password)).fetchone()
             if user_data:
                 st.session_state.logged_in = True
                 st.session_state.current_user = user_data[1] 
@@ -494,6 +500,9 @@ if not st.session_state.logged_in:
                 raw_roles = user_data[3:8]
                 roles = [r for r in raw_roles if r and str(r).strip() != ""]
                 st.session_state.available_roles = roles
+                
+                st.session_state.can_add_act = user_data[9]
+                st.session_state.can_add_item = user_data[10]
                 st.rerun()
             else:
                 st.error("Invalid Username/Password or Account is Inactive.")
@@ -507,6 +516,8 @@ if st.sidebar.button("🚪 Logout"):
     st.session_state.logged_in = False
     st.session_state.current_user = ""
     st.session_state.available_roles = []
+    st.session_state.can_add_act = "No"
+    st.session_state.can_add_item = "No"
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -536,7 +547,11 @@ if role == "Requisitor":
         act_query = """SELECT a.activity_name FROM activities a 
                        JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
         activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
-        activity_options = activities + ["➕ Add New Activity..."]
+        
+        activity_options = activities
+        if st.session_state.get('can_add_act') == 'Yes':
+            activity_options.append("➕ Add New Activity...")
+            
         selected_activity_option = col_act.selectbox("Activity", activity_options)
         
         selected_activity = selected_activity_option
@@ -547,8 +562,14 @@ if role == "Requisitor":
         # --- DYNAMIC MATERIAL SELECTION WITH ADD OPTION ---
         materials = c.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
         mat_options = {f"[{m[0]}] {m[1]}": (m[0], m[1], m[2], m[3]) for m in materials} if materials else {}
-        mat_label_options = list(mat_options.keys()) + ["➕ Add New Item..."]
         
+        mat_label_options = list(mat_options.keys())
+        if st.session_state.get('can_add_item') == 'Yes':
+            mat_label_options.append("➕ Add New Item...")
+            
+        if not mat_label_options:
+             mat_label_options = ["No items available"]
+             
         selected_mat_label = st.selectbox("Select Item", mat_label_options)
         
         if selected_mat_label == "➕ Add New Item...":
@@ -558,6 +579,9 @@ if role == "Requisitor":
             description = col_ni2.text_input("Item Description")
             default_unit = "PCS"
             default_category = "Direct Materials"
+        elif selected_mat_label == "No items available":
+            item_no, description, default_unit, default_category = "", "", "PCS", "Direct Materials"
+            st.warning("⚠️ No materials exist in the database yet. Contact an admin to add items.")
         else:
             item_no, description, default_unit, default_category = mat_options[selected_mat_label]
         
@@ -582,7 +606,9 @@ if role == "Requisitor":
             add_to_list = st.form_submit_button("➕ Add to Temporary List")
             
             if add_to_list:
-                if selected_activity_option == "➕ Add New Activity..." and not selected_activity:
+                if selected_mat_label == "No items available":
+                    st.error("⚠️ Cannot add to list. No materials selected.")
+                elif selected_activity_option == "➕ Add New Activity..." and not selected_activity:
                     st.error("⚠️ Please type a valid name for the new activity.")
                 elif selected_mat_label == "➕ Add New Item..." and (not item_no.strip() or not description.strip()):
                     st.error("⚠️ Please provide both a valid Item Number and Description for the new item.")
@@ -1138,9 +1164,10 @@ elif role == "Admin View All":
         
         with st.expander("👥 Manage System Users"):
             st.write("#### 👤 Add, Edit, or Remove Users")
-            users_df = pd.read_sql_query("SELECT id, username, password, role1, role2, role3, role4, role5, status FROM users", conn)
+            users_df = pd.read_sql_query("SELECT id, username, password, role1, role2, role3, role4, role5, status, can_add_act, can_add_item FROM users", conn)
             
             role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Admin View All"]
+            yes_no_options = ["Yes", "No"]
             
             edited_users = st.data_editor(
                 users_df,
@@ -1156,7 +1183,9 @@ elif role == "Admin View All":
                     "role3": st.column_config.SelectboxColumn("Role 3", options=role_options),
                     "role4": st.column_config.SelectboxColumn("Role 4", options=role_options),
                     "role5": st.column_config.SelectboxColumn("Role 5", options=role_options),
-                    "status": st.column_config.SelectboxColumn("Status", options=["Active", "Inactive"], default="Active")
+                    "status": st.column_config.SelectboxColumn("Status", options=["Active", "Inactive"], default="Active"),
+                    "can_add_act": st.column_config.SelectboxColumn("Can Add Act?", options=yes_no_options, default="No"),
+                    "can_add_item": st.column_config.SelectboxColumn("Can Add Item?", options=yes_no_options, default="No")
                 }
             )
             
@@ -1171,13 +1200,15 @@ elif role == "Admin View All":
                         r4 = str(row.get('role4', '')) if pd.notnull(row.get('role4')) else ''
                         r5 = str(row.get('role5', '')) if pd.notnull(row.get('role5')) else ''
                         status = str(row.get('status', 'Active')) if pd.notnull(row.get('status')) else 'Active'
+                        can_add_act = str(row.get('can_add_act', 'No')) if pd.notnull(row.get('can_add_act')) else 'No'
+                        can_add_item = str(row.get('can_add_item', 'No')) if pd.notnull(row.get('can_add_item')) else 'No'
                         
                         c.execute("""
-                            INSERT INTO users (username, password, role1, role2, role3, role4, role5, status)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO users (username, password, role1, role2, role3, role4, role5, status, can_add_act, can_add_item)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             str(row['username']), str(row['password']), 
-                            r1, r2, r3, r4, r5, status
+                            r1, r2, r3, r4, r5, status, can_add_act, can_add_item
                         ))
                 conn.commit()
                 st.success("User database updated successfully!")
