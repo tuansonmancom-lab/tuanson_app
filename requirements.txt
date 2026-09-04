@@ -1,4 +1,4 @@
 streamlit
+libsql-experimental
 pandas
-libsql
 reportlab
