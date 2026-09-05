@@ -542,6 +542,94 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     buffer.seek(0)
     return buffer.getvalue()
 
+# --- APV PDF GENERATOR FUNCTION ---
+def create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, project, total_amount):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle('Title', fontName='Helvetica-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
+    normal_style = ParagraphStyle('Normal', fontName='Helvetica', fontSize=9, leading=12)
+    bold_style = ParagraphStyle('Bold', fontName='Helvetica-Bold', fontSize=9, leading=12)
+    
+    elements.append(Paragraph("<b>TUANSON CONSTRUCTION</b>", title_style))
+    elements.append(Paragraph("<font size=8 align=center>Accounts Payable Voucher (APV)</font>", normal_style))
+    elements.append(Spacer(1, 15))
+    
+    meta_data = [
+        [Paragraph("<b>APV NO:</b>", bold_style), Paragraph(str(apv_no), normal_style), Paragraph("<b>APV DATE:</b>", bold_style), Paragraph(str(apv_date), normal_style)],
+        [Paragraph("<b>SUPPLIER:</b>", bold_style), Paragraph(str(supplier), normal_style), Paragraph("<b>PROJECT:</b>", bold_style), Paragraph(str(project), normal_style)],
+        [Paragraph("<b>PO NUMBER:</b>", bold_style), Paragraph(str(po_no), normal_style), Paragraph("<b>DR NUMBER:</b>", bold_style), Paragraph(str(dr_no), normal_style)],
+    ]
+    meta_table = Table(meta_data, colWidths=[90, 180, 90, 180])
+    meta_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('BOTTOMPADDING', (0,0), (-1,-1), 4)]))
+    elements.append(meta_table)
+    elements.append(Spacer(1, 15))
+    
+    table_data = [
+        [Paragraph("<b>PARTICULARS / DESCRIPTION</b>", bold_style), Paragraph("<b>AMOUNT</b>", bold_style)],
+        [Paragraph(f"Accounts Payable accrual for DR #{dr_no} under PO #{po_no}", normal_style), Paragraph(f"₱{total_amount:,.2f}", normal_style)],
+        [Paragraph("<b>TOTAL APV AMOUNT</b>", bold_style), Paragraph(f"<b>₱{total_amount:,.2f}</b>", bold_style)]
+    ]
+    apv_table = Table(table_data, colWidths=[400, 140])
+    apv_table.setStyle(TableStyle([
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ]))
+    elements.append(apv_table)
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+# --- CV PDF GENERATOR FUNCTION ---
+def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle('Title', fontName='Helvetica-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
+    normal_style = ParagraphStyle('Normal', fontName='Helvetica', fontSize=9, leading=12)
+    bold_style = ParagraphStyle('Bold', fontName='Helvetica-Bold', fontSize=9, leading=12)
+    
+    elements.append(Paragraph("<b>TUANSON CONSTRUCTION</b>", title_style))
+    elements.append(Paragraph(f"<font size=8 align=center>Check / Payment Voucher ({payment_method})</font>", normal_style))
+    elements.append(Spacer(1, 15))
+    
+    meta_data = [
+        [Paragraph("<b>VOUCHER NO:</b>", bold_style), Paragraph(str(cv_no), normal_style), Paragraph("<b>DATE:</b>", bold_style), Paragraph(str(cv_date), normal_style)],
+        [Paragraph("<b>PAYEE / SUPPLIER:</b>", bold_style), Paragraph(str(supplier), normal_style), Paragraph("<b>PAYMENT METHOD:</b>", bold_style), Paragraph(str(payment_method), normal_style)],
+        [Paragraph("<b>REF APV NO:</b>", bold_style), Paragraph(str(apv_no), normal_style), "", ""]
+    ]
+    meta_table = Table(meta_data, colWidths=[90, 180, 90, 180])
+    meta_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('SPAN', (1,2), (3,2)), ('BOTTOMPADDING', (0,0), (-1,-1), 4)]))
+    elements.append(meta_table)
+    elements.append(Spacer(1, 15))
+    
+    table_data = [
+        [Paragraph("<b>PARTICULARS</b>", bold_style), Paragraph("<b>AMOUNT</b>", bold_style)],
+        [Paragraph(f"Payment settlement for APV #{apv_no} to {supplier}", normal_style), Paragraph(f"₱{total_amount:,.2f}", normal_style)],
+        [Paragraph("<b>TOTAL PAYMENT AMOUNT</b>", bold_style), Paragraph(f"<b>₱{total_amount:,.2f}</b>", bold_style)]
+    ]
+    cv_table = Table(table_data, colWidths=[400, 140])
+    cv_table.setStyle(TableStyle([
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ]))
+    elements.append(cv_table)
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
 
@@ -1339,6 +1427,38 @@ elif role == "Accounting":
         else:
             st.success("🎉 All received deliveries have been vouchered with an APV!")
 
+    # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
+    with tab_apv:
+        # [Keep your existing APV generation form code here...]
+        
+        st.markdown("---")
+        st.subheader("🖨️ Generated Accounts Payable Vouchers (Ready for Printing)")
+        
+        generated_apvs = c.execute("""
+            SELECT apv_number, apv_date, dr_number, pono, supplier, project_name, total_amount 
+            FROM deliveries 
+            WHERE apv_number IS NOT NULL AND apv_number != ''
+            ORDER BY apv_date DESC
+        """).fetchall()
+        
+        if generated_apvs and HAS_REPORTLAB:
+            for idx, apv in enumerate(generated_apvs):
+                apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt = apv
+                col_info, col_btn = st.columns([3, 1])
+                col_info.write(f"📄 **APV:** {apv_no} | **Supplier:** {supplier} | **Project:** {proj} | **Amount:** ₱{total_amt:,.2f}")
+                
+                pdf_bytes = create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt)
+                col_btn.download_button(
+                    label=f"🖨️ Print APV",
+                    data=pdf_bytes,
+                    file_name=f"APV_{apv_no}.pdf",
+                    mime="application/pdf",
+                    key=f"print_apv_{apv_no}_{idx}"
+                )
+        else:
+            st.info("No generated APVs available for printing yet.")
+            
+
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
         st.write("### 💳 Outstanding Payables with Approved APV")
@@ -1418,6 +1538,39 @@ elif role == "Accounting":
                     st.error("⚠️ Please enter a valid Check Voucher Number.")
         else:
             st.success("🎉 No outstanding vouchered payables waiting for payment!")
+
+    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
+    with tab_payment:
+        # [Keep your existing Payment Processing form code here...]
+        
+        st.markdown("---")
+        st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
+        
+        issued_cvs = c.execute("""
+            SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount 
+            FROM deliveries 
+            WHERE cv_number IS NOT NULL AND cv_number != ''
+            ORDER BY cv_date DESC
+        """).fetchall()
+        
+        if issued_cvs and HAS_REPORTLAB:
+            for idx, cv in enumerate(issued_cvs):
+                cv_no, cv_date, apv_no, supplier, pay_method, total_amt = cv
+                col_info, col_btn = st.columns([3, 1])
+                col_info.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
+                
+                pdf_bytes = create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt)
+                col_btn.download_button(
+                    label=f"🖨️ Print Voucher",
+                    data=pdf_bytes,
+                    file_name=f"Voucher_{cv_no}.pdf",
+                    mime="application/pdf",
+                    key=f"print_cv_{cv_no}_{idx}"
+                )
+        else:
+            st.info("No issued check or payment vouchers available for printing yet.")
+
+    
 
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
