@@ -2,6 +2,7 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 import re
+import os
 from datetime import datetime
 from io import BytesIO
 
@@ -16,19 +17,36 @@ try:
 except ImportError:
     HAS_REPORTLAB = False
     
-# --- DATABASE SETUP (Cloud-Optimized) ---
-DB_NAME = "inventory.db"
+# --- DATABASE SETUP (Turso / SQLite Integrated) ---
+def get_db_connection():
+    """Dynamically connects to Turso if configured, otherwise falls back to local SQLite."""
+    try:
+        db_url = st.secrets.get("TURSO_DATABASE_URL", os.getenv("TURSO_DATABASE_URL", "inventory.db"))
+        auth_token = st.secrets.get("TURSO_AUTH_TOKEN", os.getenv("TURSO_AUTH_TOKEN", ""))
+    except Exception:
+        db_url = os.getenv("TURSO_DATABASE_URL", "inventory.db")
+        auth_token = os.getenv("TURSO_AUTH_TOKEN", "")
+
+    if str(db_url).startswith("libsql://") or str(db_url).startswith("https://") or str(db_url).startswith("wss://"):
+        try:
+            import libsql_experimental as turso_sqlite
+            return turso_sqlite.connect(db_url, auth_token=auth_token)
+        except ImportError:
+            st.error("Please install `libsql-experimental` to connect to Turso. Run: pip install libsql-experimental")
+            st.stop()
+    else:
+        return sqlite3.connect(db_url, check_same_thread=False)
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    conn = get_db_connection()
     c = conn.cursor()
     
     try:
         c.execute("PRAGMA journal_mode = WAL;")
         c.execute("PRAGMA synchronous = NORMAL;")
         c.execute("PRAGMA busy_timeout = 5000;")
-    except sqlite3.OperationalError:
-        pass
+    except Exception:
+        pass # Turso/libsql may safely ignore some PRAGMA statements
 
     # 1. Projects Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS projects (
@@ -115,7 +133,7 @@ def init_db():
         )
     ''')
 
-    # 8. Users Master Table (Updated to include role6)
+    # 8. Users Master Table
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,7 +180,7 @@ def init_db():
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
         try:
             c.execute(f"ALTER TABLE suppliers ADD COLUMN {col} TEXT")
-        except sqlite3.OperationalError:
+        except Exception:
             pass
 
     for col_sql in [
@@ -189,7 +207,7 @@ def init_db():
     ]:
         try:
             c.execute(f"ALTER TABLE {col_sql[0]} ADD COLUMN {col_sql[1]} {col_sql[2]}")
-        except sqlite3.OperationalError:
+        except Exception:
             pass
 
     # --- SEED INITIAL DATA ---
@@ -281,22 +299,13 @@ def generate_voucher_number(cursor, column_name, prefix):
 
 # --- PDF GENERATOR FUNCTION ---
 def create_po_pdf(pono, date_str, supplier, project, po_items):
-    import os
-    import sqlite3
-    from io import BytesIO
-    from datetime import datetime
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-
     prep_name = "VERGEL W. MANCIA"
     prep_sig_path = "Vergel_signature.png"
     appr_name = "LEIZEL A. CABUNILAS"
     appr_sig_path = "Leizel_signature.png"
 
     try:
-        with sqlite3.connect("inventory.db", check_same_thread=False) as pdf_conn:
+        with get_db_connection() as pdf_conn:
             cursor = pdf_conn.cursor()
             cursor.execute("SELECT name, role, signature_path FROM signatories")
             sigs = cursor.fetchall()
@@ -536,8 +545,8 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
 
-# Cloud Connection Management
-conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+# Cloud Connection Management Using Factory
+conn = get_db_connection()
 c = conn.cursor()
 
 # --- LOGIN SYSTEM ---
