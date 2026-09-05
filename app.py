@@ -547,14 +547,14 @@ def create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, project, total_amou
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     elements = []
-    styles = getSampleStyleSheet()
     
     title_style = ParagraphStyle('Title', fontName='Helvetica-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
+    subtitle_style = ParagraphStyle('Subtitle', fontName='Helvetica', fontSize=8, leading=10, alignment=1)
     normal_style = ParagraphStyle('Normal', fontName='Helvetica', fontSize=9, leading=12)
     bold_style = ParagraphStyle('Bold', fontName='Helvetica-Bold', fontSize=9, leading=12)
     
     elements.append(Paragraph("<b>TUANSON CONSTRUCTION</b>", title_style))
-    elements.append(Paragraph("<font size=8 align=center>Accounts Payable Voucher (APV)</font>", normal_style))
+    elements.append(Paragraph("Accounts Payable Voucher (APV)", subtitle_style))
     elements.append(Spacer(1, 15))
     
     meta_data = [
@@ -591,14 +591,14 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     elements = []
-    styles = getSampleStyleSheet()
     
     title_style = ParagraphStyle('Title', fontName='Helvetica-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
+    subtitle_style = ParagraphStyle('Subtitle', fontName='Helvetica', fontSize=8, leading=10, alignment=1)
     normal_style = ParagraphStyle('Normal', fontName='Helvetica', fontSize=9, leading=12)
     bold_style = ParagraphStyle('Bold', fontName='Helvetica-Bold', fontSize=9, leading=12)
     
     elements.append(Paragraph("<b>TUANSON CONSTRUCTION</b>", title_style))
-    elements.append(Paragraph(f"<font size=8 align=center>Check / Payment Voucher ({payment_method})</font>", normal_style))
+    elements.append(Paragraph(f"Check / Payment Voucher ({payment_method})", subtitle_style))
     elements.append(Spacer(1, 15))
     
     meta_data = [
