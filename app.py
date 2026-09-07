@@ -177,6 +177,21 @@ def init_db():
         )
     ''')
 
+    # 11. Inventory Ledger Table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS inventory_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            ref_no TEXT NOT NULL,
+            item_description TEXT NOT NULL,
+            qty_in REAL DEFAULT 0.0,
+            qty_out REAL DEFAULT 0.0,
+            balance REAL DEFAULT 0.0,
+            location TEXT,
+            remarks TEXT
+        )
+    ''')
+
     # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
         try:
@@ -284,7 +299,16 @@ def init_db():
 
 init_db()
 
-# --- SEQUENCE GENERATOR HELPER FUNCTION ---
+# --- HELPER FUNCTIONS ---
+def get_latest_item_balance(cursor, item_name):
+    """Calculates dynamic running balance for an item in inventory_ledger."""
+    result = cursor.execute("""
+        SELECT balance FROM inventory_ledger 
+        WHERE item_description = ? 
+        ORDER BY id DESC LIMIT 1
+    """, (item_name,)).fetchone()
+    return float(result[0]) if result else 0.0
+
 def generate_voucher_number(cursor, column_name, prefix):
     query = f"SELECT {column_name} FROM deliveries WHERE {column_name} IS NOT NULL AND {column_name} LIKE '{prefix}-%' ORDER BY id DESC LIMIT 1"
     last_voucher = cursor.execute(query).fetchone()
@@ -873,7 +897,11 @@ if role == "Requisitor":
 elif role == "Purchaser":
     st.subheader("🛒 Purchaser Dashboard")
     
-    tab_create_po, tab_receive = st.tabs(["📝 Create Purchase Orders", "📦 Receive Deliveries"])
+    tab_create_po, tab_receive, tab_ledger = st.tabs([
+        "📝 Create Purchase Orders", 
+        "📦 Receive Deliveries", 
+        "📊 Inventory Ledger & Issuance"
+    ])
     
     with tab_create_po:
         st.write("### 🛒 Batch Create P.O.")
@@ -1051,8 +1079,19 @@ elif role == "Purchaser":
                     c.execute("UPDATE requests SET received_status = 'Received', received_timestamp = ? WHERE pono = ?", 
                               (current_time, po_to_receive))
                     
+                    # --- AUTOMATIC INVENTORY LEDGER "QTY IN" ENTRY ---
+                    received_items = c.execute("SELECT description, qty FROM requests WHERE pono = ?", (po_to_receive,)).fetchall()
+                    for item_desc, r_qty in received_items:
+                        qty_val = float(r_qty or 0.0)
+                        prev_bal = get_latest_item_balance(c, item_desc)
+                        new_bal = prev_bal + qty_val
+                        c.execute("""
+                            INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks)
+                            VALUES (?, ?, ?, ?, 0.0, ?, ?, ?)
+                        """, (current_time, dr_number.strip(), item_desc, qty_val, new_bal, po_details['Project'], f"Received via DR #{dr_number.strip()} (PO #{po_to_receive})"))
+
                     conn.commit()
-                    st.session_state["receive_success_msg"] = f"✅ PO #{po_to_receive} received under Doc #{dr_number}! Forwarded to Accounting."
+                    st.session_state["receive_success_msg"] = f"✅ PO #{po_to_receive} received under Doc #{dr_number}! Added to Inventory Ledger and forwarded to Accounting."
                     st.rerun()
                 else:
                     st.warning("⚠️ Please input the DR / SI / OR document number.")
@@ -1110,7 +1149,76 @@ elif role == "Purchaser":
                 st.warning("⚠️ No image or document file was attached for this receiving record.")
         else:
             st.info("No received deliveries recorded yet.")
-            
+
+    with tab_ledger:
+        st.write("### 🚚 Issue Materials to Site (Qty Out)")
+
+        # Fetch list of unique items currently in inventory
+        items_db = c.execute("SELECT DISTINCT item_description FROM inventory_ledger").fetchall()
+        item_list = [i[0] for i in items_db] if items_db else []
+
+        if item_list:
+            with st.form("issue_material_form"):
+                col1, col2 = st.columns(2)
+                selected_item = col1.selectbox("Select Item", item_list)
+                
+                current_stock = get_latest_item_balance(c, selected_item)
+                col1.caption(f"Current Stock Available: **{current_stock:,.2f}**")
+                
+                qty_to_issue = col2.number_input("Qty Out", min_value=0.1, max_value=float(current_stock) if current_stock > 0 else 1.0, step=1.0)
+                mif_ref = col1.text_input("MIF / Dispatch Ref No.", value="MIF-0001")
+                site_location = col2.text_input("Destination Site / Location", placeholder="e.g. Suba Project Site")
+                issuance_remarks = st.text_input("Remarks", placeholder="e.g. Dispatched via Flatbed Truck 1")
+                
+                submit_issue = st.form_submit_button("📤 Confirm Material Dispatch")
+                
+                if submit_issue:
+                    if current_stock < qty_to_issue:
+                        st.error("⚠️ Insufficient stock available!")
+                    else:
+                        dispatch_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        new_bal = current_stock - qty_to_issue
+                        
+                        c.execute("""
+                            INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks)
+                            VALUES (?, ?, ?, 0.0, ?, ?, ?, ?)
+                        """, (dispatch_time, mif_ref.strip(), selected_item, qty_to_issue, new_bal, site_location.strip(), issuance_remarks.strip()))
+                        conn.commit()
+                        st.success(f"✅ Dispatched {qty_to_issue} units of {selected_item} to {site_location}!")
+                        st.rerun()
+        else:
+            st.info("No stock recorded in inventory ledger yet. Receive deliveries first to populate stock.")
+
+        st.markdown("---")
+        st.write("### 📊 Inventory Ledger Table")
+
+        ledger_df = pd.read_sql_query("""
+            SELECT 
+                date AS 'Date',
+                ref_no AS 'Ref',
+                item_description AS 'Item',
+                qty_in AS 'Qty in',
+                qty_out AS 'Qty Out',
+                balance AS 'Balance',
+                location AS 'Location',
+                remarks AS 'Remarks'
+            FROM inventory_ledger
+            ORDER BY id DESC
+        """, conn)
+
+        if not ledger_df.empty:
+            st.dataframe(
+                ledger_df.style.format({
+                    "Qty in": "{:,.2f}",
+                    "Qty Out": "{:,.2f}",
+                    "Balance": "{:,.2f}"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Inventory ledger is currently empty.")
+
     st.markdown("---")
     st.subheader("🖨️ Approved Purchase Orders (Ready for Printing)")
     
