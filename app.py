@@ -16,8 +16,9 @@ try:
     HAS_REPORTLAB = True
 except ImportError:
     HAS_REPORTLAB = False
-    
+
 # --- DATABASE SETUP (Turso / SQLite Integrated) ---
+@st.cache_resource
 def get_db_connection():
     """Dynamically connects to Turso if configured, otherwise falls back to local SQLite."""
     try:
@@ -280,7 +281,6 @@ def init_db():
         ])
 
     conn.commit()
-    conn.close()
 
 init_db()
 
@@ -305,18 +305,18 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     appr_sig_path = "Leizel_signature.png"
 
     try:
-        with get_db_connection() as pdf_conn:
-            cursor = pdf_conn.cursor()
-            cursor.execute("SELECT name, role, signature_path FROM signatories")
-            sigs = cursor.fetchall()
-            
-            for name, role, sig_path in sigs:
-                if role and role.strip().lower() == "preparer":
-                    if name: prep_name = name
-                    if sig_path: prep_sig_path = sig_path.strip()
-                elif role and role.strip().lower() == "approver":
-                    if name: appr_name = name
-                    if sig_path: appr_sig_path = sig_path.strip()
+        pdf_conn = get_db_connection()
+        cursor = pdf_conn.cursor()
+        cursor.execute("SELECT name, role, signature_path FROM signatories")
+        sigs = cursor.fetchall()
+        
+        for name, role, sig_path in sigs:
+            if role and role.strip().lower() == "preparer":
+                if name: prep_name = name
+                if sig_path: prep_sig_path = sig_path.strip()
+            elif role and role.strip().lower() == "approver":
+                if name: appr_name = name
+                if sig_path: appr_sig_path = sig_path.strip()
     except Exception:
         pass
 
@@ -702,6 +702,8 @@ if role == "Requisitor":
         col_proj, col_act = st.columns(2)
         
         projects = [r[0] for r in c.execute("SELECT project_name FROM projects").fetchall()]
+        if not projects:
+            projects = ["No projects available"]
         selected_project = col_proj.selectbox("Project Name", projects)
         
         # --- DYNAMIC ACTIVITY SELECTION WITH ADD OPTION ---
@@ -712,6 +714,9 @@ if role == "Requisitor":
         activity_options = list(activities)
         if st.session_state.get('can_add_act') == 'Yes':
             activity_options.append("➕ Add New Activity...")
+            
+        if not activity_options:
+            activity_options = ["No activities available"]
             
         selected_activity_option = col_act.selectbox("Activity", activity_options)
         
@@ -729,7 +734,7 @@ if role == "Requisitor":
             mat_label_options.append("➕ Add New Item...")
             
         if not mat_label_options:
-             mat_label_options = ["No items available"]
+            mat_label_options = ["No items available"]
              
         selected_mat_label = st.selectbox("Select Item", mat_label_options)
         
@@ -922,9 +927,11 @@ elif role == "Purchaser":
             col1, col2 = st.columns(2)
             
             suppliers_master = [s[0] for s in c.execute("SELECT supplier_name FROM suppliers").fetchall()]
-            
+            if not suppliers_master:
+                suppliers_master = ["No suppliers available"]
+
             default_vendor_index = 0
-            if not pending_df.empty:
+            if not pending_df.empty and suppliers_master != ["No suppliers available"]:
                 first_row_suggestion = pending_df.iloc[0]["supplier"]
                 if first_row_suggestion and first_row_suggestion in suppliers_master:
                     default_vendor_index = suppliers_master.index(first_row_suggestion)
@@ -962,6 +969,8 @@ elif role == "Purchaser":
             if st.button("✅ Submit Purchase Order", type="primary"):
                 if not po_number.strip():
                     st.error("⚠️ Please enter a valid P.O. Number before submitting.")
+                elif selected_supplier == "No suppliers available":
+                    st.error("⚠️ Please register a supplier before submitting a Purchase Order.")
                 else:
                     selected_items = edited_df[edited_df["Add to PO"] == True]
                     
@@ -1246,9 +1255,12 @@ elif role == "Office Manager":
         
     merged_df = pd.merge(projects_df, pivot_exp, left_on='Project Name', right_on='project_name', how='left').fillna(0)
     
-    merged_df['MATERIALS Amount'] = merged_df.get('Direct Materials', 0.0) + merged_df.get('Tools & Consumables', 0.0)
-    merged_df['SUBCON'] = merged_df.get('Subcontract & Services', 0.0)
-    merged_df['EQPT Amount'] = merged_df.get('Equipment & Rental', 0.0) + merged_df.get('Fuel & Lubricants', 0.0)
+    def safe_get_cat(df, cat_name):
+        return df[cat_name] if cat_name in df.columns else 0.0
+
+    merged_df['MATERIALS Amount'] = safe_get_cat(merged_df, 'Direct Materials') + safe_get_cat(merged_df, 'Tools & Consumables')
+    merged_df['SUBCON'] = safe_get_cat(merged_df, 'Subcontract & Services')
+    merged_df['EQPT Amount'] = safe_get_cat(merged_df, 'Equipment & Rental') + safe_get_cat(merged_df, 'Fuel & Lubricants')
     
     merged_df['Labor Amount'] = 0.0  
     merged_df['ADMIN'] = 0.0
@@ -1453,7 +1465,6 @@ elif role == "Accounting":
                 )
         else:
             st.info("No generated APVs available for printing yet.")
-   
 
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
@@ -1622,8 +1633,8 @@ elif role == "Admin View All":
             if st.button("💾 Save User Changes", type="primary"):
                 c.execute("DELETE FROM users")
                 for _, row in edited_users.iterrows():
-                    if pd.notnull(row['username']) and str(row['username']).strip() != "":
-                        
+                    username_val = str(row['username']).strip() if pd.notnull(row['username']) else ""
+                    if username_val:
                         r1 = str(row.get('role1', '')) if pd.notnull(row.get('role1')) else ''
                         r2 = str(row.get('role2', '')) if pd.notnull(row.get('role2')) else ''
                         r3 = str(row.get('role3', '')) if pd.notnull(row.get('role3')) else ''
@@ -1633,12 +1644,13 @@ elif role == "Admin View All":
                         status = str(row.get('status', 'Active')) if pd.notnull(row.get('status')) else 'Active'
                         can_add_act = str(row.get('can_add_act', 'No')) if pd.notnull(row.get('can_add_act')) else 'No'
                         can_add_item = str(row.get('can_add_item', 'No')) if pd.notnull(row.get('can_add_item')) else 'No'
+                        pwd = str(row.get('password', '1234')) if pd.notnull(row.get('password')) else '1234'
                         
                         c.execute("""
                             INSERT INTO users (username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
-                            str(row['username']), str(row['password']), 
+                            username_val, pwd, 
                             r1, r2, r3, r4, r5, r6, status, can_add_act, can_add_item
                         ))
                 conn.commit()
@@ -1657,9 +1669,11 @@ elif role == "Admin View All":
         with st.expander("🏗️ Manage Project Activities"):
             st.write("#### 📝 Edit & Manage Project Activities")
             projects_list = [p[0] for p in c.execute("SELECT project_name FROM projects").fetchall()]
+            if not projects_list:
+                projects_list = ["No projects available"]
             sel_proj_act = st.selectbox("Select Project for Activity", projects_list, key="sel_proj_editable")
             
-            if sel_proj_act:
+            if sel_proj_act and sel_proj_act != "No projects available":
                 proj_row = c.execute("SELECT id FROM projects WHERE project_name = ?", (sel_proj_act,)).fetchone()
                 if proj_row:
                     project_id = proj_row[0]
@@ -1696,10 +1710,10 @@ elif role == "Admin View All":
                         if col_save.button("💾 Save Table Changes", type="primary"):
                             for _, row in edited_acts_df.iterrows():
                                 act_id = row['id']
-                                act_name = row['Activity Name']
-                                act_qty = row['Qty']
-                                act_unit = row['Unit']
-                                act_amt = row['Contract Amount']
+                                act_name = str(row['Activity Name']).strip() if pd.notnull(row['Activity Name']) else ""
+                                act_qty = float(row['Qty']) if pd.notnull(row['Qty']) else 1.0
+                                act_unit = str(row['Unit']).strip() if pd.notnull(row['Unit']) else "lot"
+                                act_amt = float(row['Contract Amount']) if pd.notnull(row['Contract Amount']) else 0.0
                                 
                                 if pd.notnull(act_id):
                                     c.execute("""
@@ -1707,12 +1721,11 @@ elif role == "Admin View All":
                                         SET activity_name = ?, qty = ?, unit = ?, contract_amount = ?
                                         WHERE id = ?
                                     """, (act_name, act_qty, act_unit, act_amt, act_id))
-                                else:
-                                    if pd.notnull(act_name) and str(act_name).strip() != "":
-                                        c.execute("""
-                                            INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount)
-                                            VALUES (?, ?, ?, ?, ?)
-                                        """, (project_id, str(act_name).strip(), float(act_qty or 1.0), str(act_unit or 'lot'), float(act_amt or 0.0)))
+                                elif act_name:
+                                    c.execute("""
+                                        INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount)
+                                        VALUES (?, ?, ?, ?, ?)
+                                    """, (project_id, act_name, act_qty, act_unit, act_amt))
                             
                             original_ids = acts_df['id'].dropna().tolist()
                             current_ids = edited_acts_df['id'].dropna().tolist()
