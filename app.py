@@ -1216,6 +1216,15 @@ elif role == "Purchaser":
                 use_container_width=True,
                 hide_index=True
             )
+            
+            # --- DOWNLOAD BUTTON FOR INVENTORY LEDGER ---
+            csv_ledger = ledger_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Inventory Ledger as CSV",
+                data=csv_ledger,
+                file_name=f"inventory_ledger_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
         else:
             st.info("Inventory ledger is currently empty.")
 
@@ -1433,6 +1442,21 @@ elif role == "Office Manager":
     })
     
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+    # --- DOWNLOAD BUTTONS FOR OFFICE MANAGER SUMMARY ---
+    col_dl1, col_dl2 = st.columns([1, 4])
+    
+    # Flat single-level DataFrame export for Excel & CSV compatibility
+    export_df = final_df.copy()
+    export_df.columns = ['_'.join(col).strip() for col in export_df.columns.values]
+    
+    csv_summary = export_df.to_csv(index=False).encode('utf-8')
+    col_dl1.download_button(
+        label="📥 Download Summary (CSV)",
+        data=csv_summary,
+        file_name=f"project_financial_summary_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv"
+    )
 
 # --- ROLE 5: ACCOUNTING ---
 elif role == "Accounting":
@@ -1718,6 +1742,15 @@ elif role == "Accounting":
             d_sum = gl_df["Debit"].sum()
             c_sum = gl_df["Credit"].sum()
             st.write(f"**Total Debits:** ₱{d_sum:,.2f} | **Total Credits:** ₱{c_sum:,.2f}")
+
+            # --- DOWNLOAD BUTTON FOR GENERAL LEDGER ---
+            csv_gl = gl_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download General Ledger as CSV",
+                data=csv_gl,
+                file_name=f"general_ledger_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
         else:
             st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
 
@@ -2050,5 +2083,14 @@ elif role == "Admin View All":
         
         if not ap_summary_df.empty:
             st.dataframe(ap_summary_df.style.format({"Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
+
+            # --- DOWNLOAD BUTTON FOR ACCOUNTS PAYABLE SUMMARY ---
+            csv_ap = ap_summary_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Accounts Payable Summary as CSV",
+                data=csv_ap,
+                file_name=f"accounts_payable_summary_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
         else:
             st.info("No Accounts Payable vouchers recorded yet.")
