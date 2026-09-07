@@ -1377,7 +1377,8 @@ elif role == "Accounting":
         else:
             st.info("No accounts found in the Chart of Accounts.")
 
-# --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
+    # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
+    # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
 with tab_apv:
     st.write("### 📦 Received Deliveries Awaiting APV Generation")
     st.info("Receiving tab logs received items. Generate APV here to record Accounts Payable in the General Ledger.")
@@ -1401,12 +1402,11 @@ with tab_apv:
         suggested_apv = generate_voucher_number(c, "apv_number", "APV")
         apv_input = col2.text_input("APV Number Sequence", value=suggested_apv)
 
-        # --- 1. NEW: Fetch Chart of Accounts for Accounting Tag Selection ---
+        # 1. Fetch Chart of Accounts for Accounting Tag Selection
         try:
             accounts_df = pd.read_sql_query("SELECT account_code, account_name FROM chart_of_accounts ORDER BY account_code ASC", conn)
-            account_options = {f"{row['account_code']} - {row['account_name']}": (str(row['account_code']), row['account_name']) for _, row in accounts_df.iterrows()}
+            account_options = {f"{row['account_code']} - {row['account_name']}": (str(row['account_code']), str(row['account_name'])) for _, row in accounts_df.iterrows()}
         except Exception:
-            # Fallback options if table is empty or structure varies
             account_options = {
                 "13100 - Construction Materials": ("13100", "Construction Materials"),
                 "60200 - Direct Cost Materials": ("60200", "Direct Cost Materials"),
@@ -1414,7 +1414,6 @@ with tab_apv:
                 "60400 - Project Overhead & Supplies": ("60400", "Project Overhead & Supplies")
             }
 
-        # Accounting Tag Dropdown Selector
         selected_tag_label = st.selectbox(
             "🏷️ Select Accounting Tag / Debit Account", 
             options=list(account_options.keys()),
@@ -1422,7 +1421,7 @@ with tab_apv:
         )
         selected_account_code, selected_account_name = account_options[selected_tag_label]
 
-        # --- Fetch Line Items for Selected DR ---
+        # 2. Fetch Line Items for Selected DR
         items_df = pd.read_sql_query("""
             SELECT id, item_description, qty_received, unit_price
             FROM delivery_items
@@ -1453,19 +1452,17 @@ with tab_apv:
             selected_del = apv_df[apv_df['DR Number'] == dr_to_apv].iloc[0]
             adjusted_total = float(selected_del['Total Amount'])
 
-        # --- Dynamic Accounting Entry Preview (Reflects Selected Tag and Total) ---
-        st.info(f"""
-        💡 **Accounting Entry Preview:**
-        * **Debit:** {selected_account_name} (Code {selected_account_code}) — **₱{adjusted_total:,.2f}**
-        * **Credit:** Accounts Payable-Trade (Code 20100) — **₱{adjusted_total:,.2f}**
-        """)
+        # 3. Dynamic Accounting Entry Preview
+        st.info(f"💡 **Accounting Entry Preview:**\n"
+                f"* **Debit:** {selected_account_name} (Code {selected_account_code}) — **₱{adjusted_total:,.2f}**\n"
+                f"* **Credit:** Accounts Payable-Trade (Code 20100) — **₱{adjusted_total:,.2f}**")
         
         if st.button("✅ Generate Accounts Payable Voucher", type="primary"):
             if apv_input.strip():
                 current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 selected_del = apv_df[apv_df['DR Number'] == dr_to_apv].iloc[0]
                 
-                # 1. Save edited line items
+                # Save edited line items
                 if not edited_items.empty:
                     for _, row in edited_items.iterrows():
                         c.execute("""
@@ -1474,20 +1471,20 @@ with tab_apv:
                             WHERE id = ?
                         """, (row['qty_received'], row['unit_price'], row['subtotal'], row['id']))
 
-                # 2. Update deliveries header
+                # Update deliveries header
                 c.execute("""
                     UPDATE deliveries 
                     SET apv_number = ?, apv_date = ?, total_amount = ? 
                     WHERE dr_number = ?
                 """, (apv_input.strip(), current_time, adjusted_total, dr_to_apv))
                 
-                # 3. Post Dynamic Debit Journal Entry (using user-selected Accounting Tag)
+                # Post Debit Journal Entry with selected accounting tag
                 c.execute("""
                     INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                     VALUES (?, ?, ?, ?, ?, 0.0, ?, ?)
                 """, (current_time, apv_input.strip(), selected_account_code, selected_account_name, adjusted_total, dr_to_apv, f"APV setup for DR #{dr_to_apv} ({selected_del['Supplier']})"))
                 
-                # 4. Post Credit Journal Entry
+                # Post Credit Journal Entry
                 c.execute("""
                     INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                     VALUES (?, ?, '20100', 'Accounts Payable-Trade', 0.0, ?, ?, ?)
@@ -1519,7 +1516,7 @@ with tab_apv:
             
             pdf_bytes = create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt)
             col_btn.download_button(
-                label=f"🖨️ Print APV",
+                label="🖨️ Print APV",
                 data=pdf_bytes,
                 file_name=f"APV_{apv_no}.pdf",
                 mime="application/pdf",
@@ -1527,6 +1524,7 @@ with tab_apv:
             )
     else:
         st.info("No generated APVs available for printing yet.")
+
 
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
