@@ -709,7 +709,7 @@ if role == "Requisitor":
                        JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
         activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
         
-        activity_options = activities
+        activity_options = list(activities)
         if st.session_state.get('can_add_act') == 'Yes':
             activity_options.append("➕ Add New Activity...")
             
@@ -1707,6 +1707,12 @@ elif role == "Admin View All":
                                         SET activity_name = ?, qty = ?, unit = ?, contract_amount = ?
                                         WHERE id = ?
                                     """, (act_name, act_qty, act_unit, act_amt, act_id))
+                                else:
+                                    if pd.notnull(act_name) and str(act_name).strip() != "":
+                                        c.execute("""
+                                            INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount)
+                                            VALUES (?, ?, ?, ?, ?)
+                                        """, (project_id, str(act_name).strip(), float(act_qty or 1.0), str(act_unit or 'lot'), float(act_amt or 0.0)))
                             
                             original_ids = acts_df['id'].dropna().tolist()
                             current_ids = edited_acts_df['id'].dropna().tolist()
