@@ -1377,7 +1377,7 @@ elif role == "Accounting":
         else:
             st.info("No accounts found in the Chart of Accounts.")
 
-    # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
+   # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
     with tab_apv:
         st.write("### 📦 Received Deliveries Awaiting APV Generation")
         st.info("Receiving tab logs received items. Generate APV here to record Accounts Payable in the General Ledger.")
@@ -1393,7 +1393,6 @@ elif role == "Accounting":
         if not apv_df.empty:
             st.dataframe(apv_df.style.format({"Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
             
-           with tab_apv:
             st.markdown("---")
             st.write("#### 📑 Generate APV Document")
             col1, col2, col3 = st.columns(3)
