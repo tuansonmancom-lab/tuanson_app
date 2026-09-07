@@ -1,5 +1,5 @@
 streamlit
 pandas
-libsql-client
+libsql-experimental
 reportlab
 
