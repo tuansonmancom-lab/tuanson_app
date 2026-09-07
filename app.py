@@ -1393,17 +1393,39 @@ elif role == "Accounting":
         if not apv_df.empty:
             st.dataframe(apv_df.style.format({"Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
             
-            st.markdown("---")
+           st.markdown("---")
             st.write("#### 📑 Generate APV Document")
-            col1, col2 = st.columns(2)
+            # Changed to 3 columns to accommodate the new dropdown
+            col1, col2, col3 = st.columns(3)
             
             dr_to_apv = col1.selectbox("Select DR Number to Voucher", apv_df['DR Number'].tolist())
             suggested_apv = generate_voucher_number(c, "apv_number", "APV")
             apv_input = col2.text_input("APV Number Sequence", value=suggested_apv)
             
-            st.info("""
+            # --- NEW: Dynamic Accounting Tag (Expense Account) ---
+            expense_accounts = c.execute("SELECT account_code, account_name FROM chart_of_accounts WHERE account_type = 'Expense'").fetchall()
+            
+            if expense_accounts:
+                expense_options = [f"[{acc[0]}] {acc[1]}" for acc in expense_accounts]
+            else:
+                expense_options = ["No Expense Accounts Found"]
+                
+            selected_expense = col3.selectbox("Accounting Tag (Debit Account)", expense_options)
+            
+            # Extract the code and name from the selection
+            if selected_expense != "No Expense Accounts Found":
+                selected_acc_code = selected_expense.split("]")[0].replace("[", "")
+                selected_acc_name = selected_expense.split("]")[1].strip()
+            else:
+                # Fallback if COA has no expense accounts registered
+                selected_acc_code = "60200"
+                selected_acc_name = "Direct Cost Materials"
+            # -----------------------------------------------------
+            
+            # Preview now updates dynamically based on the dropdown selection
+            st.info(f"""
             💡 **Accounting Entry Preview:**
-            * **Debit:** Construction Materials (Code 13100) / Direct Cost Materials (Code 60200)
+            * **Debit:** {selected_acc_name} (Code {selected_acc_code})
             * **Credit:** Accounts Payable-Trade (Code 20100)
             """)
             
@@ -1420,11 +1442,11 @@ elif role == "Accounting":
                         WHERE dr_number = ?
                     """, (apv_input.strip(), current_time, dr_to_apv))
                     
-                    # Post Debit/Credit Journal Entry
+                    # Post Debit/Credit Journal Entry (Updated to use the dynamic selected account)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
-                        VALUES (?, ?, '13100', 'Construction Materials', ?, 0.0, ?, ?)
-                    """, (current_time, apv_input.strip(), total_amt, dr_to_apv, f"APV setup for DR #{dr_to_apv} ({selected_del['Supplier']})"))
+                        VALUES (?, ?, ?, ?, ?, 0.0, ?, ?)
+                    """, (current_time, apv_input.strip(), selected_acc_code, selected_acc_name, total_amt, dr_to_apv, f"APV setup for DR #{dr_to_apv} ({selected_del['Supplier']})"))
                     
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
