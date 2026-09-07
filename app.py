@@ -1454,6 +1454,56 @@ elif role == "Accounting":
         else:
             st.info("No generated APVs available for printing yet.")
 
+    import streamlit as st
+import pandas as pd
+
+def render_apv_accounting_tag_editor(apv_id, conn):
+    st.subheader("Update Receiving Items Accounting Tags")
+    
+    # 1. Fetch receiving items associated with this APV
+    # Adjust table and column names to match your actual database schema
+    query = """
+        SELECT ri.id, ri.item_name, ri.quantity, ri.unit_cost, ri.accounting_tag
+        FROM receiving_items ri
+        JOIN apv_items ai ON ri.id = ai.receiving_item_id
+        WHERE ai.apv_id = ?
+    """
+    df_items = pd.read_sql_query(query, conn, params=(apv_id,))
+    
+    if df_items.empty:
+        st.info("No receiving items found linked to this APV.")
+        return
+
+    # 2. Render an editable dataframe allowing changes only to the accounting_tag column
+    edited_df = st.data_editor(
+        df_items,
+        column_config={
+            "id": st.column_config.NumberColumn("ID", disabled=True),
+            "item_name": st.column_config.TextColumn("Item Name", disabled=True),
+            "quantity": st.column_config.NumberColumn("Qty", disabled=True),
+            "unit_cost": st.column_config.NumberColumn("Unit Cost", disabled=True),
+            "accounting_tag": st.column_config.TextColumn("Accounting Tag", help="Enter or modify the accounting tag")
+        },
+        hide_index=True,
+        key=f"apv_tag_editor_{apv_id}"
+    )
+
+    # 3. Commit updates to the database
+    if st.button("Save Accounting Tags", key=f"save_tags_btn_{apv_id}"):
+        cursor = conn.cursor()
+        try:
+            for _, row in edited_df.iterrows():
+                cursor.execute(
+                    "UPDATE receiving_items SET accounting_tag = ? WHERE id = ?",
+                    (row["accounting_tag"], row["id"])
+                )
+            conn.commit()
+            st.success("Accounting tags updated successfully!")
+            st.rerun()
+        except Exception as e:
+            conn.rollback()
+            st.error(f"Failed to update tags: {e}")
+
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
         st.write("### 💳 Outstanding Payables with Approved APV")
