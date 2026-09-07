@@ -1427,10 +1427,6 @@ elif role == "Accounting":
         else:
             st.success("🎉 All received deliveries have been vouchered with an APV!")
 
-    # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
-    with tab_apv:
-        # [Keep your existing APV generation form code here...]
-        
         st.markdown("---")
         st.subheader("🖨️ Generated Accounts Payable Vouchers (Ready for Printing)")
         
@@ -1457,7 +1453,6 @@ elif role == "Accounting":
                 )
         else:
             st.info("No generated APVs available for printing yet.")
-            
 
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
@@ -1539,10 +1534,6 @@ elif role == "Accounting":
         else:
             st.success("🎉 No outstanding vouchered payables waiting for payment!")
 
-    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
-    with tab_payment:
-        # [Keep your existing Payment Processing form code here...]
-        
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
         
@@ -1569,8 +1560,6 @@ elif role == "Accounting":
                 )
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
-
-    
 
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
@@ -1947,3 +1936,4 @@ elif role == "Admin View All":
                 st.rerun()
         else:
             st.success("🎉 No outstanding payables!")
+            
