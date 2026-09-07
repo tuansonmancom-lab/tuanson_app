@@ -1,5 +1,5 @@
 streamlit
 pandas
-libsql-experimental
+libsql-experimental==0.0.34
 reportlab
 
