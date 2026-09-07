@@ -1842,98 +1842,65 @@ elif role == "Admin View All":
                             terms_days = excluded.terms_days
                     """, (sup_name.strip(), sup_location.strip(), sup_contact_person.strip(), sup_contact_number.strip(), sup_tin.strip(), sup_vat, sup_terms))
                     conn.commit()
-                    st.success(f"Supplier '{sup_name}' successfully saved/updated!")
+                    st.success(f"Supplier '{sup_name.strip()}' saved successfully!")
                     st.rerun()
                 else:
-                    st.warning("⚠️ Please enter a Supplier Name.")
-
-        st.write("### 📊 Complete Master Landing Page")
-        st.dataframe(pd.read_sql_query("SELECT * FROM requests ORDER BY id DESC", conn), use_container_width=True, hide_index=True)
-
-        st.markdown("---")
-        st.write("### 🚨 Danger Zone: Database Management")
-        with st.expander("🗑️ Reset Test Data (Clear Transactions)"):
-            if st.radio("Are you sure you want to clear all transactions?", ("No, keep my data", "Yes, delete transactions")) == "Yes, delete transactions":
-                if st.button("🗑️ Confirm and Clear Data", type="primary"):
-                    c.execute("DELETE FROM requests")
-                    c.execute("DELETE FROM deliveries")
-                    c.execute("DELETE FROM journal_entries")
-                    conn.commit()
-                    st.success("✅ All test transactions cleared!")
-                    st.rerun()
+                    st.warning("⚠️ Please provide a supplier name.")
 
     with tab_reports:
-        st.write("### 📈 Approved Items & Summary Reports")
-        projects_query = "SELECT DISTINCT project_name FROM requests WHERE status = 'Approved / Ongoing' AND project_name IS NOT NULL AND project_name != ''"
-        suppliers_query = "SELECT DISTINCT supplier FROM requests WHERE status = 'Approved / Ongoing' AND supplier IS NOT NULL AND supplier != ''"
-        
-        available_projects = ["All Projects"] + [p[0] for p in c.execute(projects_query).fetchall()]
-        available_suppliers = ["All Suppliers"] + [s[0] for s in c.execute(suppliers_query).fetchall()]
-
-        col_f1, col_f2 = st.columns(2)
-        selected_project = col_f1.selectbox("📌 Filter by Project Name:", available_projects)
-        selected_supplier = col_f2.selectbox("🚚 Filter by Supplier:", available_suppliers)
-
-        base_query = """
-            SELECT pono AS 'P.O. Number', project_name AS 'Project Name', supplier AS 'Supplier',
-                   item_no AS 'Item No', description AS 'Description', activity AS 'Activity',
-                   qty AS 'Qty', unit AS 'Unit', price AS 'Unit Price', amount AS 'Total Amount',
-                   approved_timestamp AS 'Approved Date'
-            FROM requests WHERE status = 'Approved / Ongoing'
-        """
-        params = []
-        if selected_project != "All Projects":
-            base_query += " AND project_name = ?"
-            params.append(selected_project)
-        if selected_supplier != "All Suppliers":
-            base_query += " AND supplier = ?"
-            params.append(selected_supplier)
-        base_query += " ORDER BY id DESC"
-
-        approved_df = pd.read_sql_query(base_query, conn, params=params)
-
-        if approved_df.empty:
-            st.warning("No approved items found matching the selected filters.")
-        else:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("💰 Total Approved Cost", f"₱{approved_df['Total Amount'].sum():,.2f}")
-            m2.metric("📦 Total Approved Quantity", f"{approved_df['Qty'].sum():,.0f} units")
-            m3.metric("📄 Total Approved P.O.s", f"{approved_df['P.O. Number'].nunique()} Orders")
-
-            st.markdown("---")
-            st.dataframe(approved_df.style.format({"Unit Price": "₱{:,.2f}", "Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
-
-    with tab_payables:
-        st.write("### 💸 Accounts Payable (A/P) Monitor")
-        ap_df = pd.read_sql_query("""
-            SELECT d.pono AS 'PO Number', d.dr_number AS 'DR Number', d.supplier AS 'Supplier',
-                   d.project_name AS 'Project', d.total_amount AS 'Total Amount', d.received_date AS 'Date Received',
-                   s.terms_days AS 'Terms (Days)', d.payment_status AS 'Status',
-                   d.apv_number AS 'APV No', d.cv_number AS 'CV No'
-            FROM deliveries d
-            LEFT JOIN suppliers s ON d.supplier = s.supplier_name
-            WHERE d.payment_status = 'Unpaid'
-            ORDER BY d.received_date ASC
+        st.write("### 📊 Project Approved Reports & Audit Trail")
+        report_df = pd.read_sql_query("""
+            SELECT 
+                timestamp AS 'Date Requested',
+                project_name AS 'Project',
+                activity AS 'Activity',
+                item_no AS 'Item No',
+                description AS 'Description',
+                qty AS 'Qty',
+                unit AS 'Unit',
+                price AS 'Price',
+                amount AS 'Total Amount',
+                supplier AS 'Supplier',
+                pono AS 'P.O. No.',
+                status AS 'Status',
+                approved_by AS 'Approved By',
+                approved_timestamp AS 'Approval Date'
+            FROM requests
+            WHERE status != 'Pending Purchaser'
+            ORDER BY timestamp DESC
         """, conn)
         
-        if not ap_df.empty:
-            ap_df['Date Received'] = pd.to_datetime(ap_df['Date Received'])
-            ap_df['Terms (Days)'] = ap_df['Terms (Days)'].fillna(0).astype(int)
-            ap_df['Due Date'] = (ap_df['Date Received'] + pd.to_timedelta(ap_df['Terms (Days)'], unit='D')).dt.strftime('%Y-%m-%d')
-            ap_df['Date Received'] = ap_df['Date Received'].dt.strftime('%Y-%m-%d')
+        if not report_df.empty:
+            st.dataframe(report_df.style.format({"Price": "₱{:,.2f}", "Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
             
-            st.dataframe(ap_df.style.format({"Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
-            st.error(f"**Total Outstanding Payables:** ₱ {ap_df['Total Amount'].sum():,.2f}")
-            
-            st.markdown("---")
-            col_pay1, col_pay2 = st.columns([2, 1])
-            dr_to_pay = col_pay1.selectbox("Select DR Number to mark as Paid", ap_df['DR Number'].tolist())
-            
-            if col_pay2.button("Confirm Direct Settlement", type="primary"):
-                c.execute("UPDATE deliveries SET payment_status = 'Paid' WHERE dr_number = ?", (dr_to_pay,))
-                conn.commit()
-                st.success(f"DR #{dr_to_pay} marked as paid successfully!")
-                st.rerun()
+            csv_data = report_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Procurement Report as CSV",
+                data=csv_data,
+                file_name=f"procurement_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
         else:
-            st.success("🎉 No outstanding payables!")
-            
+            st.info("No approved or ongoing transaction records found.")
+
+    with tab_payables:
+        st.write("### 💸 Accounts Payable Summary & Aging")
+        ap_summary_df = pd.read_sql_query("""
+            SELECT 
+                pono AS 'PO Number',
+                apv_number AS 'APV Number',
+                supplier AS 'Supplier',
+                project_name AS 'Project',
+                total_amount AS 'Amount',
+                payment_status AS 'Payment Status',
+                cv_number AS 'CV Number',
+                payment_method AS 'Payment Method'
+            FROM deliveries
+            WHERE apv_number IS NOT NULL AND apv_number != ''
+            ORDER BY received_date DESC
+        """, conn)
+        
+        if not ap_summary_df.empty:
+            st.dataframe(ap_summary_df.style.format({"Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
+        else:
+            st.info("No Accounts Payable vouchers recorded yet.")
