@@ -717,7 +717,8 @@ role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.ava
 if role == "Requisitor":
     st.subheader(f"📋 Requisitor Dashboard - {st.session_state.current_user}")
     
-    tab_request, tab_track = st.tabs(["📝 New Material Request", "🔍 Track My Requests"])
+    # ADDED: "📦 Receive Incoming Items" tab to the Requisitor's tabs
+    tab_request, tab_track, tab_receive = st.tabs(["📝 New Material Request", "🔍 Track My Requests", "📦 Receive Incoming Items"])
     
     with tab_request:
         if "request_cart" not in st.session_state:
@@ -892,6 +893,69 @@ if role == "Requisitor":
             st.dataframe(history_df, use_container_width=True, hide_index=True)
         else:
             st.info("You haven't submitted any material requests yet.")
+
+    # ADDED: New functionality for Requisitor to receive items
+    with tab_receive:
+        st.write(f"### 📦 Receive Incoming Items")
+        st.info("Confirm the physical receipt of items you requested once they arrive on-site.")
+        
+        # Fetch approved but unreceived requests for this specific requisitor
+        pending_req_df = pd.read_sql_query("""
+            SELECT 
+                id,
+                timestamp AS 'Date Requested',
+                project_name AS 'Project',
+                description AS 'Item Description',
+                qty AS 'Qty',
+                unit AS 'Unit',
+                pono AS 'PO Number'
+            FROM requests
+            WHERE requester_name = ? 
+              AND status = 'Approved / Ongoing'
+              AND received_status = 'Pending'
+        """, conn, params=(st.session_state.current_user,))
+        
+        if not pending_req_df.empty:
+            st.dataframe(pending_req_df.drop(columns=['id']), use_container_width=True, hide_index=True)
+            
+            st.write("#### ✅ Confirm Item Receipt")
+            
+            # Format display options for the dropdown
+            options_dict = {
+                row['id']: f"Req ID: {row['id']} | {row['Item Description']} ({row['Qty']} {row['Unit']}) - PO: {row['PO Number']}"
+                for _, row in pending_req_df.iterrows()
+            }
+            
+            item_to_receive = st.selectbox(
+                "Select Item to Mark as Received", 
+                options=list(options_dict.keys()),
+                format_func=lambda x: options_dict[x]
+            )
+            
+            if st.button("Mark as Received", type="primary"):
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Update Request Status in DB
+                c.execute("UPDATE requests SET received_status = 'Received', received_timestamp = ? WHERE id = ?", (current_time, item_to_receive))
+                
+                # Automatically add 'Qty In' stock into the Inventory Ledger
+                req_data = c.execute("SELECT description, qty, project_name, pono FROM requests WHERE id = ?", (item_to_receive,)).fetchone()
+                if req_data:
+                    item_desc, r_qty, proj_name, po_num = req_data
+                    qty_val = float(r_qty or 0.0)
+                    prev_bal = get_latest_item_balance(c, item_desc)
+                    new_bal = prev_bal + qty_val
+                    c.execute("""
+                        INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks)
+                        VALUES (?, ?, ?, ?, 0.0, ?, ?, ?)
+                    """, (current_time, po_num or "No-PO", item_desc, qty_val, new_bal, proj_name, f"Received directly by Requisitor (Req ID #{item_to_receive})"))
+
+                conn.commit()
+                st.success("✅ Item marked as received successfully and added to Inventory Ledger!")
+                st.rerun()
+        else:
+            st.info("🎉 No pending incoming items awaiting your confirmation.")
+
 
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
