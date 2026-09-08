@@ -2028,6 +2028,21 @@ elif role == "Admin View All":
                 else:
                     st.warning("⚠️ Please provide a supplier name.")
 
+        # --- SOURCE CODE EXPORT TOOL ---
+        with st.expander("💾 Backup & Download Python Source Code (app.py)"):
+            st.write("Download a copy of this script (`app.py`) directly from the system.")
+            if os.path.exists(__file__):
+                with open(__file__, "rb") as f:
+                    code_bytes = f.read()
+                st.download_button(
+                    label="📥 Download Full app.py Source Code",
+                    data=code_bytes,
+                    file_name="app.py",
+                    mime="text/x-python"
+                )
+            else:
+                st.info("Source script path not accessible locally.")
+
     with tab_reports:
         st.write("### 📊 Project Approved Reports & Audit Trail")
         report_df = pd.read_sql_query("""
