@@ -693,41 +693,8 @@ if not st.session_state.logged_in:
             else:
                 st.error("Invalid Username/Password or Account is Inactive.")
     st.stop()
-
-@st.fragment(run_every=5)
-def watch_database_changes():
-    try:
-        cursor = c.cursor() if hasattr(c, "cursor") else c
-        
-        # Pull counts and max IDs from all active tables
-        del_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM deliveries").fetchone()
-        inv_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM inventory_ledger").fetchone()
-        jour_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM journal_entries").fetchone()
-        
-        current_fingerprint = (
-            del_check[0] or 0, del_check[1] or 0,
-            inv_check[0] or 0, inv_check[1] or 0,
-            jour_check[0] or 0, jour_check[1] or 0
-        )
-    except Exception:
-        return
-
-    if "master_db_fingerprint" not in st.session_state:
-        st.session_state.master_db_fingerprint = current_fingerprint
-        return
-
-    if current_fingerprint != st.session_state.master_db_fingerprint:
-        st.session_state.master_db_fingerprint = current_fingerprint
-        st.toast("⚡ Database update detected! Refreshing views...", icon="🔄")
-        st.rerun()
     
 # --- IF LOGGED IN: SHOW MAIN APP ---
-
-    # Call it here with normal 4-space indentation
-    watch_database_changes()
-    
-    # Rest of your dashboard UI code
-    st.title("Dashboard")
 
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
