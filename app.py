@@ -694,15 +694,9 @@ if not st.session_state.logged_in:
                 st.error("Invalid Username/Password or Account is Inactive.")
     st.stop()
 
-# --- IF LOGGED IN: SHOW MAIN APP ---
-
-# --- AFTER SUCCESSFUL LOGIN ---
-
-    from streamlit_autorefresh import st_autorefresh
-    
-    # Keep the background tick alive (e.g., every 5 seconds)
-    st_autorefresh(interval=5000, limit=None, key="smart_datarefresh")
-    
+# Define a fragment that runs quietly every 5 seconds in the background
+@st.fragment(run_every=5)
+def background_db_watcher(c):
     # Get current DB fingerprint
     current_fingerprint = get_db_fingerprint(c)
     
@@ -715,13 +709,20 @@ if not st.session_state.logged_in:
     if current_fingerprint != st.session_state.last_db_fingerprint:
         st.session_state.last_db_fingerprint = current_fingerprint
         st.session_state.db_has_changed = True
-        st.toast("🔄 New database activity detected! Updating views...", icon="⚡")
+        # Trigger a full app rerun ONLY when a change is actually detected
+        st.rerun()
     else:
         st.session_state.db_has_changed = False
+    
+# --- IF LOGGED IN: SHOW MAIN APP ---
 
-    # Optional: Cache heavy dataframes or queries using st.cache_data 
-    # so they only re-query when st.session_state.db_has_changed is True.
-
+# Call the fragment here. It will poll silently every 5s.
+    # The rest of your dashboard stays completely stable until a change happens.
+    background_db_watcher(c)
+    
+    # --- Rest of your dashboard UI code ---
+    st.title("My Dashboard")
+    st.write("This page will only refresh when Turso data changes!")
 
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
