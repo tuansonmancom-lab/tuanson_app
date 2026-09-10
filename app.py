@@ -896,65 +896,63 @@ if role == "Requisitor":
 
     # ADDED: New functionality for Requisitor to receive items
     with tab_receive:
-        st.write(f"### 📦 Receive Incoming Items")
-        st.info("Confirm the physical receipt of items you requested once they arrive on-site.")
+        st.write(f"### 📦 Receive Incoming Site Dispatches")
+        st.info("Confirm the physical receipt of materials dispatched to your project site.")
         
-        # Fetch approved but unreceived requests for this specific requisitor
-        pending_req_df = pd.read_sql_query("""
-            SELECT 
-                id,
-                timestamp AS 'Date Requested',
-                project_name AS 'Project',
-                description AS 'Item Description',
-                qty AS 'Qty',
-                unit AS 'Unit',
-                pono AS 'PO Number'
-            FROM requests
-            WHERE requester_name = ? 
-              AND status = 'Approved / Ongoing'
-              AND received_status = 'Pending'
-        """, conn, params=(st.session_state.current_user,))
+        # Fetch the logged-in user's assigned project/location from the database
+        user_info = c.execute("SELECT project FROM users WHERE username = ?", (st.session_state.current_user,)).fetchone()
+        user_project = user_info[0] if user_info and user_info[0] else ""
         
-        if not pending_req_df.empty:
-            st.dataframe(pending_req_df.drop(columns=['id']), use_container_width=True, hide_index=True)
-            
-            st.write("#### ✅ Confirm Item Receipt")
-            
-            # Format display options for the dropdown
-            options_dict = {
-                row['id']: f"Req ID: {row['id']} | {row['Item Description']} ({row['Qty']} {row['Unit']}) - PO: {row['PO Number']}"
-                for _, row in pending_req_df.iterrows()
-            }
-            
-            item_to_receive = st.selectbox(
-                "Select Item to Mark as Received", 
-                options=list(options_dict.keys()),
-                format_func=lambda x: options_dict[x]
-            )
-            
-            if st.button("Mark as Received", type="primary"):
-                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                
-                # Update Request Status in DB
-                c.execute("UPDATE requests SET received_status = 'Received', received_timestamp = ? WHERE id = ?", (current_time, item_to_receive))
-                
-                # Automatically add 'Qty In' stock into the Inventory Ledger
-                req_data = c.execute("SELECT description, qty, project_name, pono FROM requests WHERE id = ?", (item_to_receive,)).fetchone()
-                if req_data:
-                    item_desc, r_qty, proj_name, po_num = req_data
-                    qty_val = float(r_qty or 0.0)
-                    prev_bal = get_latest_item_balance(c, item_desc)
-                    new_bal = prev_bal + qty_val
-                    c.execute("""
-                        INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks)
-                        VALUES (?, ?, ?, ?, 0.0, ?, ?, ?)
-                    """, (current_time, po_num or "No-PO", item_desc, qty_val, new_bal, proj_name, f"Received directly by Requisitor (Req ID #{item_to_receive})"))
-
-                conn.commit()
-                st.success("✅ Item marked as received successfully and added to Inventory Ledger!")
-                st.rerun()
+        if not user_project:
+            st.warning("⚠️ No project assigned to your user account. Please contact the administrator.")
         else:
-            st.info("🎉 No pending incoming items awaiting your confirmation.")
+            # Fetch pending dispatches strictly matching the user's project location
+            pending_ledger_df = pd.read_sql_query("""
+                SELECT 
+                    id,
+                    date AS 'Dispatch Date',
+                    ref_no AS 'Ref / MIF No.',
+                    item_description AS 'Item Description',
+                    qty_out AS 'Qty Dispatched',
+                    location AS 'Destination Project',
+                    remarks AS 'Remarks'
+                FROM inventory_ledger
+                WHERE qty_out > 0 
+                  AND status = 'Pending'
+                  AND location = ?
+            """, conn, params=(user_project,))
+            
+            if not pending_ledger_df.empty:
+                st.dataframe(pending_ledger_df.drop(columns=['id']), use_container_width=True, hide_index=True)
+                
+                st.write("#### ✅ Confirm Physical Receipt")
+                
+                options_dict = {
+                    row['id']: f"ID: {row['id']} | {row['Item Description']} ({row['Qty Dispatched']} units) - Ref: {row['Ref / MIF No.']}"
+                    for _, row in pending_ledger_df.iterrows()
+                }
+                
+                item_to_receive = st.selectbox(
+                    "Select Dispatch to Confirm", 
+                    options=list(options_dict.keys()),
+                    format_func=lambda x: options_dict[x]
+                )
+                
+                if st.button("Confirm Physical Receipt", type="primary"):
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    c.execute("""
+                        UPDATE inventory_ledger 
+                        SET status = 'Completed', 
+                            remarks = remarks || ' | Confirmed received on ' || ? 
+                        WHERE id = ?
+                    """, (current_time, item_to_receive))
+                    
+                    conn.commit()
+                    st.success("✅ Material receipt confirmed successfully!")
+                    st.rerun()
+            else:
+                st.info(f"🎉 No pending dispatches awaiting confirmation for project: **{user_project}**.")
 
 
 # --- ROLE 2: PURCHASER ---
