@@ -979,6 +979,10 @@ elif role == "Purchaser":
     with tab_create_po:
         st.write("### 🛒 Batch Create P.O.")
         
+        # Manual refresh button for Tab 1
+        if st.button("🔄 Refresh Pending Requests", key="btn_refresh_create_po"):
+            st.rerun()
+        
         pending_df = pd.read_sql_query(
             "SELECT id, project_name, activity, item_no, description, qty, unit, price AS est_price, supplier FROM requests WHERE status = 'Pending Purchaser'", 
             conn
@@ -1096,6 +1100,10 @@ elif role == "Purchaser":
     with tab_receive:
         st.write("### 🚚 Record Supplier Deliveries")
         st.info("Log items that have arrived on-site and upload attached Delivery Receipts (DR), Sales Invoices (SI), or Official Receipts (OR).")
+
+        # Manual refresh button for Tab 2
+        if st.button("🔄 Refresh Deliveries", key="btn_refresh_receive_deliveries"):
+            st.rerun()
         
         if "receive_success_msg" in st.session_state:
             st.success(st.session_state.pop("receive_success_msg"))
@@ -1225,7 +1233,11 @@ elif role == "Purchaser":
 
     with tab_ledger:
         st.write("### 🚚 Issue Materials to Site (Qty Out)")
-
+        
+        # Manual refresh button for Tab 3
+        if st.button("🔄 Refresh Ledger Data", key="btn_refresh_inventory_ledger"):
+            st.rerun()
+        
         # Fetch list of unique items currently in inventory
         items_db = c.execute("SELECT DISTINCT item_description FROM inventory_ledger").fetchall()
         item_list = [i[0] for i in items_db] if items_db else []
