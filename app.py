@@ -895,19 +895,25 @@ if role == "Requisitor":
             st.info("You haven't submitted any material requests yet.")
 
     # ADDED: New functionality for Requisitor to receive items
-    with tab_receive:
+   with tab_receive:
         st.write(f"### 📦 Receive Incoming Site Dispatches")
         st.info("Confirm the physical receipt of materials dispatched to your project site.")
         
-        # Fetch the logged-in user's assigned project/location from the database
-        user_info = c.execute("SELECT project FROM users WHERE username = ?", (st.session_state.current_user,)).fetchone()
-        user_project = user_info[0] if user_info and user_info[0] else ""
+        # Get the list of projects associated with this logged-in user from the requests table
+        user_projects_df = pd.read_sql_query("""
+            SELECT DISTINCT project_name 
+            FROM requests 
+            WHERE requester_name = ? AND project_name IS NOT NULL AND project_name != ''
+        """, conn, params=(st.session_state.current_user,))
         
-        if not user_project:
-            st.warning("⚠️ No project assigned to your user account. Please contact the administrator.")
+        user_projects = user_projects_df['project_name'].tolist() if not user_projects_df.empty else []
+        
+        if not user_projects:
+            st.warning("⚠️ No project history found for your account in requests. Please ensure you have made a project request first.")
         else:
-            # Fetch pending dispatches strictly matching the user's project location
-            pending_ledger_df = pd.read_sql_query("""
+            # Use placeholders for the IN clause to securely query pending inventory ledger dispatches matching the user's projects
+            placeholders = ','.join(['?'] * len(user_projects))
+            query = f"""
                 SELECT 
                     id,
                     date AS 'Dispatch Date',
@@ -919,8 +925,10 @@ if role == "Requisitor":
                 FROM inventory_ledger
                 WHERE qty_out > 0 
                   AND status = 'Pending'
-                  AND location = ?
-            """, conn, params=(user_project,))
+                  AND location IN ({placeholders})
+            """
+            
+            pending_ledger_df = pd.read_sql_query(query, conn, params=tuple(user_projects))
             
             if not pending_ledger_df.empty:
                 st.dataframe(pending_ledger_df.drop(columns=['id']), use_container_width=True, hide_index=True)
@@ -928,7 +936,7 @@ if role == "Requisitor":
                 st.write("#### ✅ Confirm Physical Receipt")
                 
                 options_dict = {
-                    row['id']: f"ID: {row['id']} | {row['Item Description']} ({row['Qty Dispatched']} units) - Ref: {row['Ref / MIF No.']}"
+                    row['id']: f"ID: {row['id']} | {row['Item Description']} ({row['Qty Dispatched']} units) - Ref: {row['Ref / MIF No.']} @ {row['Destination Project']}"
                     for _, row in pending_ledger_df.iterrows()
                 }
                 
@@ -952,7 +960,7 @@ if role == "Requisitor":
                     st.success("✅ Material receipt confirmed successfully!")
                     st.rerun()
             else:
-                st.info(f"🎉 No pending dispatches awaiting confirmation for project: **{user_project}**.")
+                st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
 
 
 # --- ROLE 2: PURCHASER ---
