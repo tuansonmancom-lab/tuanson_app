@@ -694,35 +694,58 @@ if not st.session_state.logged_in:
                 st.error("Invalid Username/Password or Account is Inactive.")
     st.stop()
 
+    # Define your database connection function so we can get a fresh look each time
+def get_turso_connection():
+    # Replace this with your actual Turso/libsql connection string & auth token setup
+    # conn = libsql.connect("libsql://your-db.turso.io", auth_token="your-token")
+    # return conn
+    pass
+
 # Define a fragment that runs quietly every 5 seconds in the background
 @st.fragment(run_every=5)
-def background_db_watcher(c):
-    # Get current DB fingerprint
-    current_fingerprint = get_db_fingerprint(c)
-    
-    # Initialize session state tracker if it doesn't exist
+def background_db_watcher():
+    try:
+        # 1. Open a fresh connection/cursor to query the live Turso database
+        conn = get_turso_connection() # Use your actual connection function here
+        cursor = conn.cursor()
+        
+        # 2. Get current DB fingerprint
+        req_max = cursor.execute("SELECT MAX(id), COUNT(*) FROM requests").fetchone()
+        del_max = cursor.execute("SELECT MAX(id), COUNT(*) FROM deliveries").fetchone()
+        gl_max = cursor.execute("SELECT MAX(id), COUNT(*) FROM journal_entries").fetchone()
+        
+        current_fingerprint = (
+            req_max[0] or 0, req_max[1] or 0,
+            del_max[0] or 0, del_max[1] or 0,
+            gl_max[0] or 0, gl_max[1] or 0
+        )
+        conn.close() # Close immediately so we don't hold open connections
+    except Exception as e:
+        # Fallback if connection fails temporarily
+        return
+
+    # 3. Initialize session state tracker if it doesn't exist
     if "last_db_fingerprint" not in st.session_state:
         st.session_state.last_db_fingerprint = current_fingerprint
         st.session_state.db_has_changed = False
     
-    # Compare current state with last known state
+    # 4. Compare current state with last known state
     if current_fingerprint != st.session_state.last_db_fingerprint:
         st.session_state.last_db_fingerprint = current_fingerprint
         st.session_state.db_has_changed = True
-        # Trigger a full app rerun ONLY when a change is actually detected
+        # This forces the app to rerun ONLY when a change is detected from another user/tab
         st.rerun()
     else:
         st.session_state.db_has_changed = False
     
 # --- IF LOGGED IN: SHOW MAIN APP ---
 
-# Call the fragment here. It will poll silently every 5s.
-    # The rest of your dashboard stays completely stable until a change happens.
-    background_db_watcher(c)
+# CRITICAL: You must call the fragment function here so it registers on the page!
+    background_db_watcher()
     
     # --- Rest of your dashboard UI code ---
     st.title("My Dashboard")
-    st.write("This page will only refresh when Turso data changes!")
+    st.write("This page will refresh automatically the moment Turso detects changes from any user.")
 
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
