@@ -694,17 +694,16 @@ if not st.session_state.logged_in:
                 st.error("Invalid Username/Password or Account is Inactive.")
     st.stop()
 
-   @st.fragment(run_every=5)
+@st.fragment(run_every=5)
 def watch_database_changes():
     try:
         cursor = c.cursor() if hasattr(c, "cursor") else c
         
-        # Pull counts and max IDs from all active tables shown in your schema
+        # Pull counts and max IDs from all active tables
         del_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM deliveries").fetchone()
         inv_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM inventory_ledger").fetchone()
         jour_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM journal_entries").fetchone()
         
-        # Combine them into a master fingerprint tuple
         current_fingerprint = (
             del_check[0] or 0, del_check[1] or 0,
             inv_check[0] or 0, inv_check[1] or 0,
@@ -713,21 +712,18 @@ def watch_database_changes():
     except Exception:
         return
 
-    # Initialize tracker on first load
     if "master_db_fingerprint" not in st.session_state:
         st.session_state.master_db_fingerprint = current_fingerprint
         return
 
-    # If any table changes (deliveries, inventory, or journal entries)
     if current_fingerprint != st.session_state.master_db_fingerprint:
         st.session_state.master_db_fingerprint = current_fingerprint
         st.toast("⚡ Database update detected! Refreshing views...", icon="🔄")
         st.rerun()
-
     
 # --- IF LOGGED IN: SHOW MAIN APP ---
 
-# Activate the background listener for all three tables
+    # Call it here with normal 4-space indentation
     watch_database_changes()
     
     # Rest of your dashboard UI code
