@@ -2,4 +2,4 @@ streamlit
 pandas
 libsql-experimental
 reportlab
-pip install streamlit-autorefresh
+streamlit-autorefresh
