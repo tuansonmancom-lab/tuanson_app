@@ -911,7 +911,6 @@ if role == "Requisitor":
         if not user_projects:
             st.warning("⚠️ No project history found for your account in requests. Please ensure you have made a project request first.")
         else:
-            # Use placeholders for the IN clause to securely query pending inventory ledger dispatches matching the user's projects
             placeholders = ','.join(['?'] * len(user_projects))
             query = f"""
                 SELECT 
