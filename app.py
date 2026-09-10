@@ -694,58 +694,44 @@ if not st.session_state.logged_in:
                 st.error("Invalid Username/Password or Account is Inactive.")
     st.stop()
 
-    # Define your database connection function so we can get a fresh look each time
-def get_turso_connection():
-    # Replace this with your actual Turso/libsql connection string & auth token setup
-    # conn = libsql.connect("libsql://your-db.turso.io", auth_token="your-token")
-    # return conn
-    pass
-
-# Define a fragment that runs quietly every 5 seconds in the background
-@st.fragment(run_every=5)
-def background_db_watcher():
+   @st.fragment(run_every=5)
+def watch_database_changes():
     try:
-        # 1. Open a fresh connection/cursor to query the live Turso database
-        conn = get_turso_connection() # Use your actual connection function here
-        cursor = conn.cursor()
+        cursor = c.cursor() if hasattr(c, "cursor") else c
         
-        # 2. Get current DB fingerprint
-        req_max = cursor.execute("SELECT MAX(id), COUNT(*) FROM requests").fetchone()
-        del_max = cursor.execute("SELECT MAX(id), COUNT(*) FROM deliveries").fetchone()
-        gl_max = cursor.execute("SELECT MAX(id), COUNT(*) FROM journal_entries").fetchone()
+        # Pull counts and max IDs from all active tables shown in your schema
+        del_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM deliveries").fetchone()
+        inv_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM inventory_ledger").fetchone()
+        jour_check = cursor.execute("SELECT MAX(id), COUNT(*) FROM journal_entries").fetchone()
         
+        # Combine them into a master fingerprint tuple
         current_fingerprint = (
-            req_max[0] or 0, req_max[1] or 0,
-            del_max[0] or 0, del_max[1] or 0,
-            gl_max[0] or 0, gl_max[1] or 0
+            del_check[0] or 0, del_check[1] or 0,
+            inv_check[0] or 0, inv_check[1] or 0,
+            jour_check[0] or 0, jour_check[1] or 0
         )
-        conn.close() # Close immediately so we don't hold open connections
-    except Exception as e:
-        # Fallback if connection fails temporarily
+    except Exception:
         return
 
-    # 3. Initialize session state tracker if it doesn't exist
-    if "last_db_fingerprint" not in st.session_state:
-        st.session_state.last_db_fingerprint = current_fingerprint
-        st.session_state.db_has_changed = False
-    
-    # 4. Compare current state with last known state
-    if current_fingerprint != st.session_state.last_db_fingerprint:
-        st.session_state.last_db_fingerprint = current_fingerprint
-        st.session_state.db_has_changed = True
-        # This forces the app to rerun ONLY when a change is detected from another user/tab
+    # Initialize tracker on first load
+    if "master_db_fingerprint" not in st.session_state:
+        st.session_state.master_db_fingerprint = current_fingerprint
+        return
+
+    # If any table changes (deliveries, inventory, or journal entries)
+    if current_fingerprint != st.session_state.master_db_fingerprint:
+        st.session_state.master_db_fingerprint = current_fingerprint
+        st.toast("⚡ Database update detected! Refreshing views...", icon="🔄")
         st.rerun()
-    else:
-        st.session_state.db_has_changed = False
+
     
 # --- IF LOGGED IN: SHOW MAIN APP ---
 
-# CRITICAL: You must call the fragment function here so it registers on the page!
-    background_db_watcher()
+# Activate the background listener for all three tables
+    watch_database_changes()
     
-    # --- Rest of your dashboard UI code ---
-    st.title("My Dashboard")
-    st.write("This page will refresh automatically the moment Turso detects changes from any user.")
+    # Rest of your dashboard UI code
+    st.title("Dashboard")
 
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
