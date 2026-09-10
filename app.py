@@ -1243,12 +1243,13 @@ elif role == "Purchaser":
                         dispatch_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         new_bal = current_stock - qty_to_issue
                         
+                        # UPDATED: Added 'status' to the columns and 'Pending' to the values
                         c.execute("""
-                            INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks)
-                            VALUES (?, ?, ?, 0.0, ?, ?, ?, ?)
+                            INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks, status)
+                            VALUES (?, ?, ?, 0.0, ?, ?, ?, ?, 'Pending')
                         """, (dispatch_time, mif_ref.strip(), selected_item, qty_to_issue, new_bal, site_location.strip(), issuance_remarks.strip()))
                         conn.commit()
-                        st.success(f"✅ Dispatched {qty_to_issue} units of {selected_item} to {site_location}!")
+                        st.success(f"✅ Dispatched {qty_to_issue} units of {selected_item} to {site_location}! Awaiting site confirmation.")
                         st.rerun()
         else:
             st.info("No stock recorded in inventory ledger yet. Receive deliveries first to populate stock.")
