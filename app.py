@@ -6,10 +6,6 @@ import os
 from datetime import datetime
 from io import BytesIO
 
-from streamlit_autorefresh import st_autorefresh
-
-# Run every 5000 milliseconds (5 seconds)
-count = st_autorefresh(interval=5000, limit=None, key="datarefresh")
 
 # --- REPORTLAB PDF GENERATION LIBRARIES ---
 try:
