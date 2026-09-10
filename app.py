@@ -697,7 +697,7 @@ if not st.session_state.logged_in:
 # --- IF LOGGED IN: SHOW MAIN APP ---
 
 # --- AFTER SUCCESSFUL LOGIN ---
-if "logged_in" in st.session_state and st.session_state.logged_in:
+
     from streamlit_autorefresh import st_autorefresh
     
     # Keep the background tick alive (e.g., every 5 seconds)
