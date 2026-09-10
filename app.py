@@ -929,71 +929,76 @@ if role == "Requisitor":
         else:
             st.info("You haven't submitted any material requests yet.")
 
-    # ADDED: New functionality for Requisitor to receive items
+# ADDED: New functionality for Requisitor to receive items
         with tab_receive:
-                st.write("### 📦 Receive Incoming Site Dispatches")
-                st.info("Confirm the physical receipt of materials dispatched to your project site.")
+            st.write("### 📦 Receive Incoming Site Dispatches")
+            st.info("Confirm the physical receipt of materials dispatched to your project site.")
+            
+            # Manual refresh button
+            if st.button("🔄 Refresh Dispatches", key="btn_refresh_receiving"):
+                st.rerun()
                 
-                user_projects_df = pd.read_sql_query("""
-                    SELECT DISTINCT project_name 
-                    FROM requests 
-                    WHERE requester_name = ? AND project_name IS NOT NULL AND project_name != ''
-                """, conn, params=(st.session_state.current_user,))
+            user_projects_df = pd.read_sql_query("""
+                SELECT DISTINCT project_name 
+                FROM requests 
+                WHERE requester_name = ? AND project_name IS NOT NULL AND project_name != ''
+            """, conn, params=(st.session_state.current_user,))
+            
+            user_projects = user_projects_df['project_name'].tolist() if not user_projects_df.empty else []
+            
+            if not user_projects:
+                st.warning("⚠️ No project history found for your account in requests. Please ensure you have made a project request first.")
+            else:
+                placeholders = ','.join(['?'] * len(user_projects))
+                query = f"""
+                    SELECT 
+                        id,
+                        date AS 'Dispatch Date',
+                        ref_no AS 'Ref / MIF No.',
+                        item_description AS 'Item Description',
+                        qty_out AS 'Qty Dispatched',
+                        location AS 'Destination Project',
+                        remarks AS 'Remarks'
+                    FROM inventory_ledger
+                    WHERE qty_out > 0 
+                      AND status = 'Pending'
+                      AND location IN ({placeholders})
+                """
                 
-                user_projects = user_projects_df['project_name'].tolist() if not user_projects_df.empty else []
+                pending_ledger_df = pd.read_sql_query(query, conn, params=tuple(user_projects))
                 
-                if not user_projects:
-                    st.warning("⚠️ No project history found for your account in requests. Please ensure you have made a project request first.")
+                if not pending_ledger_df.empty:
+                    st.dataframe(pending_ledger_df.drop(columns=['id']), use_container_width=True, hide_index=True)
+                    
+                    st.write("#### ✅ Confirm Physical Receipt")
+                    
+                    options_dict = {
+                        row['id']: f"ID: {row['id']} | {row['Item Description']} ({row['Qty Dispatched']} units) - Ref: {row['Ref / MIF No.']} @ {row['Destination Project']}"
+                        for _, row in pending_ledger_df.iterrows()
+                    }
+                    
+                    item_to_receive = st.selectbox(
+                        "Select Dispatch to Confirm", 
+                        options=list(options_dict.keys()),
+                        format_func=lambda x: options_dict[x]
+                    )
+                    
+                    if st.button("Confirm Physical Receipt", type="primary"):
+                        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        c.execute("""
+                            UPDATE inventory_ledger 
+                            SET status = 'Completed', 
+                                remarks = remarks || ' | Confirmed received on ' || ? 
+                            WHERE id = ?
+                        """, (current_time, item_to_receive))
+                        
+                        conn.commit()
+                        st.success("✅ Material receipt confirmed successfully!")
+                        st.rerun()
                 else:
-                    placeholders = ','.join(['?'] * len(user_projects))
-                    query = f"""
-                        SELECT 
-                            id,
-                            date AS 'Dispatch Date',
-                            ref_no AS 'Ref / MIF No.',
-                            item_description AS 'Item Description',
-                            qty_out AS 'Qty Dispatched',
-                            location AS 'Destination Project',
-                            remarks AS 'Remarks'
-                        FROM inventory_ledger
-                        WHERE qty_out > 0 
-                          AND status = 'Pending'
-                          AND location IN ({placeholders})
-                    """
+                    st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
                     
-                    pending_ledger_df = pd.read_sql_query(query, conn, params=tuple(user_projects))
-                    
-                    if not pending_ledger_df.empty:
-                        st.dataframe(pending_ledger_df.drop(columns=['id']), use_container_width=True, hide_index=True)
-                        
-                        st.write("#### ✅ Confirm Physical Receipt")
-                        
-                        options_dict = {
-                            row['id']: f"ID: {row['id']} | {row['Item Description']} ({row['Qty Dispatched']} units) - Ref: {row['Ref / MIF No.']} @ {row['Destination Project']}"
-                            for _, row in pending_ledger_df.iterrows()
-                        }
-                        
-                        item_to_receive = st.selectbox(
-                            "Select Dispatch to Confirm", 
-                            options=list(options_dict.keys()),
-                            format_func=lambda x: options_dict[x]
-                        )
-                        
-                        if st.button("Confirm Physical Receipt", type="primary"):
-                            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                            
-                            c.execute("""
-                                UPDATE inventory_ledger 
-                                SET status = 'Completed', 
-                                    remarks = remarks || ' | Confirmed received on ' || ? 
-                                WHERE id = ?
-                            """, (current_time, item_to_receive))
-                            
-                            conn.commit()
-                            st.success("✅ Material receipt confirmed successfully!")
-                            st.rerun()
-                    else:
-                        st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
     st.subheader("🛒 Purchaser Dashboard")
