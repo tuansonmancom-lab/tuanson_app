@@ -695,10 +695,33 @@ if not st.session_state.logged_in:
     st.stop()
 
 # --- IF LOGGED IN: SHOW MAIN APP ---
-from streamlit_autorefresh import st_autorefresh
 
-# Run every 5000 milliseconds (5 seconds)
-count = st_autorefresh(interval=5000, limit=None, key="datarefresh")
+# --- AFTER SUCCESSFUL LOGIN ---
+if "logged_in" in st.session_state and st.session_state.logged_in:
+    from streamlit_autorefresh import st_autorefresh
+    
+    # Keep the background tick alive (e.g., every 5 seconds)
+    st_autorefresh(interval=5000, limit=None, key="smart_datarefresh")
+    
+    # Get current DB fingerprint
+    current_fingerprint = get_db_fingerprint(c)
+    
+    # Initialize session state tracker if it doesn't exist
+    if "last_db_fingerprint" not in st.session_state:
+        st.session_state.last_db_fingerprint = current_fingerprint
+        st.session_state.db_has_changed = False
+    
+    # Compare current state with last known state
+    if current_fingerprint != st.session_state.last_db_fingerprint:
+        st.session_state.last_db_fingerprint = current_fingerprint
+        st.session_state.db_has_changed = True
+        st.toast("🔄 New database activity detected! Updating views...", icon="⚡")
+    else:
+        st.session_state.db_has_changed = False
+
+    # Optional: Cache heavy dataframes or queries using st.cache_data 
+    # so they only re-query when st.session_state.db_has_changed is True.
+
 
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
