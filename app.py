@@ -1347,7 +1347,11 @@ elif role == "Purchaser":
 # --- ROLE 3: APPROVER ---
 elif role == "Approver":
     st.subheader("✅ Approver Dashboard (Leizel Cabunilas)")
-    
+
+    # Manual refresh button for Approver dashboard
+    if st.button("🔄 Refresh Approval Queue", key="btn_refresh_approver_queue"):
+        st.rerun()
+        
     st.subheader("⏳ Pending Approval Queue")
     pending_pos = c.execute("""
         SELECT pono, supplier, project_name, MAX(timestamp) as req_time 
@@ -1429,6 +1433,11 @@ elif role == "Approver":
 # --- ROLE 4: OFFICE MANAGER ---
 elif role == "Office Manager":
     st.subheader("📊 Office Manager Dashboard - Project Status & Expenses")
+
+    # Manual refresh button for Office Manager dashboard
+    if st.button("🔄 Refresh Financial Data", key="btn_refresh_office_manager"):
+        st.rerun()
+    
     st.write("### 📈 Real-Time Project Financial Monitoring")
     
     projects_df = pd.read_sql_query("""
