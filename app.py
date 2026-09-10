@@ -695,6 +695,11 @@ if not st.session_state.logged_in:
     st.stop()
 
 # --- IF LOGGED IN: SHOW MAIN APP ---
+
+from streamlit_autorefresh import st_autorefresh
+    # Refreshes every 5 seconds only when logged in
+    st_autorefresh(interval=5000, limit=None, key="datarefresh")
+
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
 st.sidebar.write(f"👤 **Logged in as:** {st.session_state.current_user}")
