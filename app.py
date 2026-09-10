@@ -1556,6 +1556,10 @@ elif role == "Office Manager":
 # --- ROLE 5: ACCOUNTING ---
 elif role == "Accounting":
     st.subheader("🧾 Accounting Dashboard - Payables & Disbursements")
+
+    # Manual refresh button for Accounting dashboard
+    if st.button("🔄 Refresh Accounting Data", key="btn_refresh_accounting"):
+        st.rerun()
     
     tab_coa, tab_apv, tab_payment, tab_gl = st.tabs([
         "📊 Chart of Accounts", 
