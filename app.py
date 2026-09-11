@@ -1966,7 +1966,7 @@ elif role == "Accounting":
             st.info("No issued check or payment vouchers available for printing yet.")
 
     # --- TAB 3: GENERAL LEDGER ---
-   with tab_gl:
+    with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
         
         # Fetch journal entries and join with deliveries to map Supplier names
