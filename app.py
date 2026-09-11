@@ -6,6 +6,48 @@ import os
 from datetime import datetime
 from io import BytesIO
 
+def get_income_statement(conn, start_date, end_date):
+    query = """
+        SELECT 
+            c.account_code,
+            c.account_name,
+            c.account_type,
+            SUM(j.debit) as total_debit,
+            SUM(j.credit) as total_credit,
+            CASE 
+                WHEN c.account_type = 'Revenue' THEN SUM(j.credit - j.debit)
+                ELSE SUM(j.debit - j.credit)
+            END as amount
+        FROM chart_of_accounts c
+        LEFT JOIN journal_entries j ON c.account_code = j.account_code 
+            AND DATE(j.entry_date) BETWEEN ? AND ?
+        WHERE c.account_type IN ('Revenue', 'Expense')
+        GROUP BY c.account_code, c.account_name, c.account_type
+        HAVING amount != 0 OR amount IS NOT NULL
+        ORDER BY c.account_code ASC
+    """
+    return pd.read_sql_query(query, conn, params=(start_date, end_date))
+
+def get_balance_sheet(conn, as_of_date):
+    query = """
+        SELECT 
+            c.account_code,
+            c.account_name,
+            c.account_type,
+            CASE 
+                WHEN c.account_type = 'Asset' THEN SUM(j.debit - j.credit)
+                ELSE SUM(j.credit - j.debit)
+            END as amount
+        FROM chart_of_accounts c
+        LEFT JOIN journal_entries j ON c.account_code = j.account_code 
+            AND DATE(j.entry_date) <= ?
+        WHERE c.account_type IN ('Asset', 'Liability', 'Equity')
+        GROUP BY c.account_code, c.account_name, c.account_type
+        HAVING amount != 0 OR amount IS NOT NULL
+        ORDER BY c.account_code ASC
+    """
+    return pd.read_sql_query(query, conn, params=(as_of_date,))
+    
 
 # --- REPORTLAB PDF GENERATION LIBRARIES ---
 try:
@@ -1945,6 +1987,7 @@ elif role == "Accounting":
             )
         else:
             st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
+            
 
 # --- ROLE 6: ADMIN VIEW ALL ---
 elif role == "Admin View All":
