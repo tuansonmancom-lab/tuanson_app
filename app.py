@@ -685,15 +685,23 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     elements = []
     
+    # Styles
     title_style = ParagraphStyle('Title', fontName='Helvetica-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
     subtitle_style = ParagraphStyle('Subtitle', fontName='Helvetica', fontSize=8, leading=10, alignment=1)
     normal_style = ParagraphStyle('Normal', fontName='Helvetica', fontSize=9, leading=12)
     bold_style = ParagraphStyle('Bold', fontName='Helvetica-Bold', fontSize=9, leading=12)
     
+    # Custom styles for the accounting table
+    header_style = ParagraphStyle('HeaderStyle', fontName='Helvetica-Bold', fontSize=9, textColor=colors.white)
+    right_align_normal = ParagraphStyle('RightNormal', fontName='Helvetica', fontSize=9, alignment=2)
+    right_align_bold = ParagraphStyle('RightBold', fontName='Helvetica-Bold', fontSize=9, alignment=2)
+    
+    # Header
     elements.append(Paragraph("<b>TUANSON CONSTRUCTION</b>", title_style))
     elements.append(Paragraph(f"Check / Payment Voucher ({payment_method})", subtitle_style))
     elements.append(Spacer(1, 15))
     
+    # Meta Data Table
     meta_data = [
         [Paragraph("<b>VOUCHER NO:</b>", bold_style), Paragraph(str(cv_no), normal_style), Paragraph("<b>DATE:</b>", bold_style), Paragraph(str(cv_date), normal_style)],
         [Paragraph("<b>PAYEE / SUPPLIER:</b>", bold_style), Paragraph(str(supplier), normal_style), Paragraph("<b>PAYMENT METHOD:</b>", bold_style), Paragraph(str(payment_method), normal_style)],
@@ -704,19 +712,50 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount
     elements.append(meta_table)
     elements.append(Spacer(1, 15))
     
+    # Accounting Entries Title
+    elements.append(Paragraph("<b>Accounting Entries (General Ledger Distribution)</b>", bold_style))
+    elements.append(Spacer(1, 8))
+    
+    # Double-Entry Table Data
+    # Note: Hardcoded account codes (20100 for AP, 10100 for Cash) are used as standard examples.
     table_data = [
-        [Paragraph("<b>PARTICULARS</b>", bold_style), Paragraph("<b>AMOUNT</b>", bold_style)],
-        [Paragraph(f"Payment settlement for APV #{apv_no} to {supplier}", normal_style), Paragraph(f"₱{total_amount:,.2f}", normal_style)],
-        [Paragraph("<b>TOTAL PAYMENT AMOUNT</b>", bold_style), Paragraph(f"<b>₱{total_amount:,.2f}</b>", bold_style)]
+        [Paragraph("<b>Account Code & Name</b>", header_style), 
+         Paragraph("<b>Description</b>", header_style), 
+         Paragraph("<b>Debit (₱)</b>", header_style), 
+         Paragraph("<b>Credit (₱)</b>", header_style)],
+         
+        # Debit Row (Accounts Payable)
+        [Paragraph("<b>20100</b> - Accounts Payable-Trade", normal_style), 
+         Paragraph(f"Payment settlement for APV #{apv_no} to {supplier}", normal_style), 
+         Paragraph(f"₱{total_amount:,.2f}", right_align_normal), 
+         Paragraph("-", right_align_normal)],
+         
+        # Credit Row (Cash in Bank / Check)
+        [Paragraph("<b>10100</b> - Cash in Bank", normal_style), 
+         Paragraph(f"Payment issued via {payment_method}", normal_style), 
+         Paragraph("-", right_align_normal), 
+         Paragraph(f"₱{total_amount:,.2f}", right_align_normal)],
+         
+        # Total Row
+        [Paragraph("<b>TOTAL</b>", bold_style), 
+         "", 
+         Paragraph(f"<b>₱{total_amount:,.2f}</b>", right_align_bold), 
+         Paragraph(f"<b>₱{total_amount:,.2f}</b>", right_align_bold)]
     ]
-    cv_table = Table(table_data, colWidths=[400, 140])
+    
+    # Table Formatting to match the APV style
+    cv_table = Table(table_data, colWidths=[160, 200, 90, 90])
     cv_table.setStyle(TableStyle([
-        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2c4356')), # Dark blue header
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
         ('TOPPADDING', (0,0), (-1,-1), 6),
         ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.whitesmoke) # Slight gray for the totals row
     ]))
+    
     elements.append(cv_table)
     
     doc.build(elements)
