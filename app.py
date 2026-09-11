@@ -568,46 +568,114 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     return buffer.getvalue()
 
 # --- APV PDF GENERATOR FUNCTION ---
-def create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, project, total_amount):
+# --- REPORTLAB PDF GENERATOR FOR APV WITH DOUBLE ENTRY ---
+def create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt, conn):
+    from io import BytesIO
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-    elements = []
+    story = []
     
-    title_style = ParagraphStyle('Title', fontName='Helvetica-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
-    subtitle_style = ParagraphStyle('Subtitle', fontName='Helvetica', fontSize=8, leading=10, alignment=1)
-    normal_style = ParagraphStyle('Normal', fontName='Helvetica', fontSize=9, leading=12)
-    bold_style = ParagraphStyle('Bold', fontName='Helvetica-Bold', fontSize=9, leading=12)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=16, alignment=1, textColor=colors.HexColor("#C0392B"))
+    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=10, alignment=1, textColor=colors.HexColor("#555555"))
+    bold_label = ParagraphStyle('BoldLabel', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9)
+    regular_val = ParagraphStyle('RegularVal', parent=styles['Normal'], fontName='Helvetica', fontSize=9)
+    table_header = ParagraphStyle('TableHeader', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white)
+    table_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=9)
+    table_cell_right = ParagraphStyle('TableCellRight', parent=styles['Normal'], fontName='Helvetica', fontSize=9, alignment=2)
     
-    elements.append(Paragraph("<b>TUANSON CONSTRUCTION</b>", title_style))
-    elements.append(Paragraph("Accounts Payable Voucher (APV)", subtitle_style))
-    elements.append(Spacer(1, 15))
+    # Header
+    story.append(Paragraph("TUANSON CONSTRUCTION", title_style))
+    story.append(Paragraph("Accounts Payable Voucher (APV)", subtitle_style))
+    story.append(Spacer(1, 15))
     
+    # Meta Info Table
     meta_data = [
-        [Paragraph("<b>APV NO:</b>", bold_style), Paragraph(str(apv_no), normal_style), Paragraph("<b>APV DATE:</b>", bold_style), Paragraph(str(apv_date), normal_style)],
-        [Paragraph("<b>SUPPLIER:</b>", bold_style), Paragraph(str(supplier), normal_style), Paragraph("<b>PROJECT:</b>", bold_style), Paragraph(str(project), normal_style)],
-        [Paragraph("<b>PO NUMBER:</b>", bold_style), Paragraph(str(po_no), normal_style), Paragraph("<b>DR NUMBER:</b>", bold_style), Paragraph(str(dr_no), normal_style)],
+        [Paragraph("APV NO:", bold_label), Paragraph(str(apv_no), regular_val), Paragraph("APV DATE:", bold_label), Paragraph(str(apv_date), regular_val)],
+        [Paragraph("SUPPLIER:", bold_label), Paragraph(str(supplier), regular_val), Paragraph("PROJECT:", bold_label), Paragraph(str(proj), regular_val)],
+        [Paragraph("PO NUMBER:", bold_label), Paragraph(str(po_no), regular_val), Paragraph("DR NUMBER:", bold_label), Paragraph(str(dr_no), regular_val)]
     ]
-    meta_table = Table(meta_data, colWidths=[90, 180, 90, 180])
-    meta_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('BOTTOMPADDING', (0,0), (-1,-1), 4)]))
-    elements.append(meta_table)
-    elements.append(Spacer(1, 15))
+    meta_table = Table(meta_data, colWidths=[70, 190, 70, 210])
+    meta_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(meta_table)
+    story.append(Spacer(1, 15))
     
-    table_data = [
-        [Paragraph("<b>PARTICULARS / DESCRIPTION</b>", bold_style), Paragraph("<b>AMOUNT</b>", bold_style)],
-        [Paragraph(f"Accounts Payable accrual for DR #{dr_no} under PO #{po_no}", normal_style), Paragraph(f"₱{total_amount:,.2f}", normal_style)],
-        [Paragraph("<b>TOTAL APV AMOUNT</b>", bold_style), Paragraph(f"<b>₱{total_amount:,.2f}</b>", bold_style)]
-    ]
-    apv_table = Table(table_data, colWidths=[400, 140])
-    apv_table.setStyle(TableStyle([
-        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+    # --- DOUBLE ENTRY ACCOUNTING TABLE ---
+    story.append(Paragraph("<b>Accounting Entries (General Ledger Distribution)</b>", bold_label))
+    story.append(Spacer(1, 5))
+    
+    # Query journal entries for this APV voucher number
+    c_cursor = conn.cursor()
+    entries = c_cursor.execute("""
+        SELECT account_code, account_name, debit, credit, description 
+        FROM journal_entries 
+        WHERE voucher_no = ?
+    """, (apv_no,)).fetchall()
+    
+    entry_table_data = [[
+        Paragraph("<b>Account Code & Name</b>", table_header),
+        Paragraph("<b>Description</b>", table_header),
+        Paragraph("<b>Debit (₱)</b>", table_header),
+        Paragraph("<b>Credit (₱)</b>", table_header)
+    ]]
+    
+    tot_debit = 0.0
+    tot_credit = 0.0
+    
+    if entries:
+        for row in entries:
+            acc_code, acc_name, debit, credit, desc = row
+            tot_debit += float(debit)
+            tot_credit += float(credit)
+            
+            d_str = f"₱{debit:,.2f}" if debit > 0 else "-"
+            c_str = f"₱{credit:,.2f}" if credit > 0 else "-"
+            
+            entry_table_data.append([
+                Paragraph(f"<b>{acc_code}</b> - {acc_name}", table_cell),
+                Paragraph(str(desc), table_cell),
+                Paragraph(d_str, table_cell_right),
+                Paragraph(c_str, table_cell_right)
+            ])
+    else:
+        # Fallback if entries not found in journal table yet
+        entry_table_data.append([
+            Paragraph("Standard Payable Accrual", table_cell),
+            Paragraph(f"APV for DR #{dr_no}", table_cell),
+            Paragraph(f"₱{total_amt:,.2f}", table_cell_right),
+            Paragraph("-", table_cell_right)
+        ])
+        tot_debit = total_amt
+        tot_credit = total_amt
+
+    # Totals row
+    entry_table_data.append([
+        Paragraph("<b>TOTAL</b>", table_cell),
+        Paragraph("", table_cell),
+        Paragraph(f"<b>₱{tot_debit:,.2f}</b>", table_cell_right),
+        Paragraph(f"<b>₱{tot_credit:,.2f}</b>", table_cell_right)
+    ])
+    
+    entry_table = Table(entry_table_data, colWidths=[170, 170, 90, 90])
+    entry_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
         ('TOPPADDING', (0,0), (-1,-1), 6),
         ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#ECF0F1")),
     ]))
-    elements.append(apv_table)
+    story.append(entry_table)
     
-    doc.build(elements)
+    doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
@@ -1554,10 +1622,10 @@ elif role == "Office Manager":
     )
 
 # --- ROLE 5: ACCOUNTING ---
+# --- ROLE 5: ACCOUNTING (UPDATED TAB 1) ---
 elif role == "Accounting":
     st.subheader("🧾 Accounting Dashboard - Payables & Disbursements")
-
-    # Manual refresh button for Accounting dashboard
+    
     if st.button("🔄 Refresh Accounting Data", key="btn_refresh_accounting"):
         st.rerun()
     
@@ -1632,7 +1700,6 @@ elif role == "Accounting":
             suggested_apv = generate_voucher_number(c, "apv_number", "APV")
             apv_input = col2.text_input("APV Number Sequence", value=suggested_apv)
             
-            # --- Dynamic Accounting Tag (Expense Account) ---
             expense_accounts = c.execute("SELECT account_code, account_name FROM chart_of_accounts WHERE account_type = 'Expense'").fetchall()
             
             if expense_accounts:
@@ -1642,7 +1709,6 @@ elif role == "Accounting":
                 
             selected_expense = col3.selectbox("Accounting Tag (Debit Account)", expense_options)
             
-            # Extract the code and name from the selection
             if selected_expense != "No Expense Accounts Found":
                 selected_acc_code = selected_expense.split("]")[0].replace("[", "")
                 selected_acc_name = selected_expense.split("]")[1].strip()
@@ -1650,7 +1716,6 @@ elif role == "Accounting":
                 selected_acc_code = "60200"
                 selected_acc_name = "Direct Cost Materials"
             
-            # Dynamic Accounting Entry Preview
             st.info(f"""
             💡 **Accounting Entry Preview:**
             * **Debit:** {selected_acc_name} (Code {selected_acc_code})
@@ -1670,7 +1735,7 @@ elif role == "Accounting":
                         WHERE dr_number = ?
                     """, (apv_input.strip(), current_time, dr_to_apv))
                     
-                    # Post Debit Entry using selected account tag
+                    # Post Debit Entry
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                         VALUES (?, ?, ?, ?, ?, 0.0, ?, ?)
@@ -1706,7 +1771,8 @@ elif role == "Accounting":
                 col_info, col_btn = st.columns([3, 1])
                 col_info.write(f"📄 **APV:** {apv_no} | **Supplier:** {supplier} | **Project:** {proj} | **Amount:** ₱{total_amt:,.2f}")
                 
-                pdf_bytes = create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt)
+                # Pass `conn` to include the double-entry table dynamically in the generated PDF
+                pdf_bytes = create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt, conn)
                 col_btn.download_button(
                     label=f"🖨️ Print APV",
                     data=pdf_bytes,
@@ -1716,6 +1782,8 @@ elif role == "Accounting":
                 )
         else:
             st.info("No generated APVs available for printing yet.")
+
+
 
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
