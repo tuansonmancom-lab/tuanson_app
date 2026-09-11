@@ -1966,32 +1966,89 @@ elif role == "Accounting":
             st.info("No issued check or payment vouchers available for printing yet.")
 
     # --- TAB 3: GENERAL LEDGER ---
-    with tab_gl:
+   with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
+        
+        # Fetch journal entries and join with deliveries to map Supplier names
         gl_df = pd.read_sql_query("""
-            SELECT id AS 'Entry ID', entry_date AS 'Date', voucher_no AS 'Voucher No', 
-                   account_code AS 'Account Code', account_name AS 'Account Name', 
-                   debit AS 'Debit', credit AS 'Credit', ref_no AS 'Ref Doc', description AS 'Description'
-            FROM journal_entries
-            ORDER BY id DESC
+            SELECT 
+                j.id AS 'Entry ID', 
+                j.entry_date AS 'Date', 
+                j.voucher_no AS 'Voucher No', 
+                j.account_code AS 'Account Code', 
+                j.account_name AS 'Account Name', 
+                j.debit AS 'Debit', 
+                j.credit AS 'Credit', 
+                j.ref_no AS 'Ref Doc', 
+                j.description AS 'Description',
+                COALESCE(d.supplier, '') AS 'Supplier'
+            FROM journal_entries j
+            LEFT JOIN deliveries d ON (j.ref_no = d.dr_number OR j.ref_no = d.apv_number OR j.ref_no = d.cv_number)
+            ORDER BY j.id DESC
         """, conn)
         
-        if not gl_df.empty:
-            st.dataframe(gl_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
-            
-            d_sum = gl_df["Debit"].sum()
-            c_sum = gl_df["Credit"].sum()
-            st.write(f"**Total Debits:** ₱{d_sum:,.2f} | **Total Credits:** ₱{c_sum:,.2f}")
+        # Get list of unique suppliers from the deliveries table
+        suppliers_df = pd.read_sql_query("SELECT DISTINCT supplier FROM deliveries WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC", conn)
+        supplier_list = suppliers_df['supplier'].tolist() if not suppliers_df.empty else []
 
-            csv_gl = gl_df.to_csv(index=False).encode('utf-8')
+        if not gl_df.empty:
+            st.markdown("---")
+            st.subheader("🔍 Filter & Subsummary")
+            
+            # Filter Dropdowns
+            col_f1, col_f2 = st.columns(2)
+            
+            all_accounts = ["All Account Titles"] + sorted(gl_df['Account Name'].dropna().unique().tolist())
+            selected_account = col_f1.selectbox("Filter by Account Title", all_accounts, key="gl_filter_acc")
+            
+            all_suppliers = ["All Suppliers"] + sorted(supplier_list)
+            selected_supplier = col_f2.selectbox("Filter by Supplier", all_suppliers, key="gl_filter_sup")
+            
+            # Apply Filter Logic
+            filtered_df = gl_df.copy()
+            
+            if selected_account != "All Account Titles":
+                filtered_df = filtered_df[filtered_df['Account Name'] == selected_account]
+                
+            if selected_supplier != "All Suppliers":
+                # Matches either joined Supplier record or supplier name in Description text
+                filtered_df = filtered_df[
+                    (filtered_df['Supplier'] == selected_supplier) | 
+                    (filtered_df['Description'].str.contains(selected_supplier, case=False, na=False))
+                ]
+
+            # Dynamic Subsummary Calculations
+            sub_debit = filtered_df["Debit"].sum()
+            sub_credit = filtered_df["Credit"].sum()
+            sub_net = sub_debit - sub_credit
+
+            # Display Subsummary Cards
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Filtered Total Debits", f"₱{sub_debit:,.2f}")
+            m2.metric("Filtered Total Credits", f"₱{sub_credit:,.2f}")
+            m3.metric("Net Activity (Debit - Credit)", f"₱{sub_net:,.2f}")
+            
+            st.markdown("---")
+            
+            # Render Table without internal helper column
+            display_df = filtered_df.drop(columns=['Supplier'])
+            st.dataframe(
+                display_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), 
+                use_container_width=True, 
+                hide_index=True
+            )
+
+            # CSV Download for filtered records
+            csv_gl = display_df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="📥 Download General Ledger as CSV",
+                label="📥 Download Filtered General Ledger as CSV",
                 data=csv_gl,
-                file_name=f"general_ledger_{datetime.now().strftime('%Y%m%d')}.csv",
+                file_name=f"general_ledger_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
         else:
             st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
+            
 
     # --- TAB 4: FINANCIAL STATEMENTS ---
     with tab_fs:
