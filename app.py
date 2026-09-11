@@ -1689,18 +1689,20 @@ elif role == "Office Manager":
     )
 
 # --- ROLE 5: ACCOUNTING ---
-# --- ROLE 5: ACCOUNTING (UPDATED TAB 1) ---
+# --- ROLE 5: ACCOUNTING (UPDATED WITH FINANCIAL STATEMENTS) ---
 elif role == "Accounting":
-    st.subheader("🧾 Accounting Dashboard - Payables & Disbursements")
+    st.subheader("🧾 Accounting Dashboard - Payables & Financial Reports")
     
     if st.button("🔄 Refresh Accounting Data", key="btn_refresh_accounting"):
         st.rerun()
     
-    tab_coa, tab_apv, tab_payment, tab_gl = st.tabs([
+    # Updated to 5 tabs including Financial Statements
+    tab_coa, tab_apv, tab_payment, tab_gl, tab_fs = st.tabs([
         "📊 Chart of Accounts", 
         "📝 Accounts Payable Voucher (APV)", 
         "💸 Check / Payment Voucher (CV)", 
-        "📖 General Ledger Entries"
+        "📖 General Ledger Entries",
+        "📈 Financial Statements"
     ])
     
     # --- TAB 0: CHART OF ACCOUNTS ---
@@ -1726,8 +1728,8 @@ elif role == "Accounting":
                             conn.commit()
                             st.success(f"Account {new_acc_code.strip()} - {new_acc_name.strip()} added successfully!")
                             st.rerun()
-                        except sqlite3.IntegrityError:
-                            st.error(f"⚠️ Account Code '{new_acc_code.strip()}' already exists.")
+                        except Exception as e:
+                            st.error(f"⚠️ Account Code '{new_acc_code.strip()}' already exists or error occurred.")
                     else:
                         st.warning("⚠️ Please provide both an Account Code and Account Name.")
 
@@ -1743,7 +1745,7 @@ elif role == "Accounting":
         else:
             st.info("No accounts found in the Chart of Accounts.")
 
-   # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
+    # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
     with tab_apv:
         st.write("### 📦 Received Deliveries Awaiting APV Generation")
         st.info("Receiving tab logs received items. Generate APV here to record Accounts Payable in the General Ledger.")
@@ -1838,7 +1840,6 @@ elif role == "Accounting":
                 col_info, col_btn = st.columns([3, 1])
                 col_info.write(f"📄 **APV:** {apv_no} | **Supplier:** {supplier} | **Project:** {proj} | **Amount:** ₱{total_amt:,.2f}")
                 
-                # Pass `conn` to include the double-entry table dynamically in the generated PDF
                 pdf_bytes = create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt, conn)
                 col_btn.download_button(
                     label=f"🖨️ Print APV",
@@ -1849,8 +1850,6 @@ elif role == "Accounting":
                 )
         else:
             st.info("No generated APVs available for printing yet.")
-
-
 
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
@@ -1913,7 +1912,6 @@ elif role == "Accounting":
                     
                     c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_pay['PO Number'],))
                     
-                    # Post Debit/Credit Journal Entry
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                         VALUES (?, ?, '20100', 'Accounts Payable-Trade', ?, 0.0, ?, ?)
@@ -1977,7 +1975,6 @@ elif role == "Accounting":
             c_sum = gl_df["Credit"].sum()
             st.write(f"**Total Debits:** ₱{d_sum:,.2f} | **Total Credits:** ₱{c_sum:,.2f}")
 
-            # --- DOWNLOAD BUTTON FOR GENERAL LEDGER ---
             csv_gl = gl_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Download General Ledger as CSV",
@@ -1987,6 +1984,93 @@ elif role == "Accounting":
             )
         else:
             st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
+
+    # --- TAB 4: FINANCIAL STATEMENTS ---
+    with tab_fs:
+        st.write("### 📈 Financial Statements & Performance Reports")
+        
+        fs_tab1, fs_tab2 = st.tabs(["Income Statement", "Balance Sheet"])
+
+        # --- SUB-TAB 1: INCOME STATEMENT ---
+        with fs_tab1:
+            st.subheader("Income Statement (Profit & Loss)")
+            col1, col2 = st.columns(2)
+            start_d = col1.date_input("Start Date", pd.to_datetime("2026-01-01"))
+            end_d = col2.date_input("End Date", pd.to_datetime("2026-12-31"))
+
+            df_is = get_income_statement(conn, start_d, end_d)
+            
+            rev_df = df_is[df_is['account_type'] == 'Revenue']
+            exp_df = df_is[df_is['account_type'] == 'Expense']
+            
+            total_rev = rev_df['amount'].sum() if not rev_df.empty else 0.0
+            total_exp = exp_df['amount'].sum() if not exp_df.empty else 0.0
+            net_income = total_rev - total_exp
+
+            st.markdown("**Revenues**")
+            st.dataframe(rev_df[['account_code', 'account_name', 'amount']].rename(
+                columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
+            ), use_container_width=True, hide_index=True)
+            st.metric("Total Revenue", f"₱{total_rev:,.2f}")
+
+            st.markdown("**Expenses & Costs**")
+            st.dataframe(exp_df[['account_code', 'account_name', 'amount']].rename(
+                columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
+            ), use_container_width=True, hide_index=True)
+            st.metric("Total Expenses", f"₱{total_exp:,.2f}")
+            
+            st.divider()
+            st.metric("NET INCOME / (LOSS)", f"₱{net_income:,.2f}")
+
+        # --- SUB-TAB 2: BALANCE SHEET ---
+        with fs_tab2:
+            st.subheader("Balance Sheet")
+            as_of = st.date_input("As of Date", pd.to_datetime("2026-12-31"))
+
+            df_bs = get_balance_sheet(conn, as_of)
+            
+            # Calculate Net Profit up to "as_of" date to close into Equity
+            df_is_till_date = get_income_statement(conn, "1900-01-01", as_of)
+            rev_until = df_is_till_date[df_is_till_date['account_type'] == 'Revenue']['amount'].sum() if not df_is_till_date.empty else 0.0
+            exp_until = df_is_till_date[df_is_till_date['account_type'] == 'Expense']['amount'].sum() if not df_is_till_date.empty else 0.0
+            current_net_income = rev_until - exp_until
+
+            assets = df_bs[df_bs['account_type'] == 'Asset']
+            liabilities = df_bs[df_bs['account_type'] == 'Liability']
+            equity = df_bs[df_bs['account_type'] == 'Equity']
+
+            tot_assets = assets['amount'].sum() if not assets.empty else 0.0
+            tot_liab = liabilities['amount'].sum() if not liabilities.empty else 0.0
+            tot_equity = (equity['amount'].sum() if not equity.empty else 0.0) + current_net_income
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown("**Assets**")
+                st.dataframe(assets[['account_code', 'account_name', 'amount']].rename(
+                    columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
+                ), use_container_width=True, hide_index=True)
+                st.metric("Total Assets", f"₱{tot_assets:,.2f}")
+
+            with col_b:
+                st.markdown("**Liabilities**")
+                st.dataframe(liabilities[['account_code', 'account_name', 'amount']].rename(
+                    columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
+                ), use_container_width=True, hide_index=True)
+                st.metric("Total Liabilities", f"₱{tot_liab:,.2f}")
+                
+                st.markdown("**Equity**")
+                st.dataframe(equity[['account_code', 'account_name', 'amount']].rename(
+                    columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
+                ), use_container_width=True, hide_index=True)
+                st.write(f"Current Period Net Profit: **₱{current_net_income:,.2f}**")
+                st.metric("Total Equity", f"₱{tot_equity:,.2f}")
+
+            st.divider()
+            balanced = abs(tot_assets - (tot_liab + tot_equity)) < 0.01
+            if balanced:
+                st.success(f" Balance Check Passed: Total Assets (₱{tot_assets:,.2f}) = Liabilities + Equity (₱{tot_liab + tot_equity:,.2f})")
+            else:
+                st.error(f"⚠️ Unbalanced! Assets: ₱{tot_assets:,.2f} | Liabilities + Equity: ₱{tot_liab + tot_equity:,.2f}")
             
 
 # --- ROLE 6: ADMIN VIEW ALL ---
