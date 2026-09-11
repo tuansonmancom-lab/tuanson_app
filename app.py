@@ -7,46 +7,54 @@ from datetime import datetime
 from io import BytesIO
 
 def get_income_statement(conn, start_date, end_date):
+    # Convert date objects to text strings for Turso parameter binding
+    start_str = str(start_date)
+    end_str = str(end_date)
+    
     query = """
         SELECT 
             c.account_code,
             c.account_name,
             c.account_type,
-            SUM(j.debit) as total_debit,
-            SUM(j.credit) as total_credit,
+            COALESCE(SUM(j.debit), 0.0) as total_debit,
+            COALESCE(SUM(j.credit), 0.0) as total_credit,
             CASE 
-                WHEN c.account_type = 'Revenue' THEN SUM(j.credit - j.debit)
-                ELSE SUM(j.debit - j.credit)
+                WHEN c.account_type = 'Revenue' THEN COALESCE(SUM(j.credit - j.debit), 0.0)
+                ELSE COALESCE(SUM(j.debit - j.credit), 0.0)
             END as amount
         FROM chart_of_accounts c
         LEFT JOIN journal_entries j ON c.account_code = j.account_code 
             AND DATE(j.entry_date) BETWEEN ? AND ?
         WHERE c.account_type IN ('Revenue', 'Expense')
         GROUP BY c.account_code, c.account_name, c.account_type
-        HAVING amount != 0 OR amount IS NOT NULL
+        HAVING amount != 0
         ORDER BY c.account_code ASC
     """
-    return pd.read_sql_query(query, conn, params=(start_date, end_date))
+    return pd.read_sql_query(query, conn, params=(start_str, end_str))
 
 def get_balance_sheet(conn, as_of_date):
+    as_of_str = str(as_of_date)
+    
     query = """
         SELECT 
             c.account_code,
             c.account_name,
             c.account_type,
+            COALESCE(SUM(j.debit), 0.0) as total_debit,
+            COALESCE(SUM(j.credit), 0.0) as total_credit,
             CASE 
-                WHEN c.account_type = 'Asset' THEN SUM(j.debit - j.credit)
-                ELSE SUM(j.credit - j.debit)
+                WHEN c.account_type = 'Asset' THEN COALESCE(SUM(j.debit - j.credit), 0.0)
+                ELSE COALESCE(SUM(j.credit - j.debit), 0.0)
             END as amount
         FROM chart_of_accounts c
         LEFT JOIN journal_entries j ON c.account_code = j.account_code 
             AND DATE(j.entry_date) <= ?
         WHERE c.account_type IN ('Asset', 'Liability', 'Equity')
         GROUP BY c.account_code, c.account_name, c.account_type
-        HAVING amount != 0 OR amount IS NOT NULL
+        HAVING amount != 0
         ORDER BY c.account_code ASC
     """
-    return pd.read_sql_query(query, conn, params=(as_of_date,))
+    return pd.read_sql_query(query, conn, params=(as_of_str,))
     
 
 # --- REPORTLAB PDF GENERATION LIBRARIES ---
