@@ -14,6 +14,20 @@ try:
     from reportlab.lib.units import inch
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.lib.fonts import addMapping
+
+    # --- REGISTER THE ROBOTO FONTS ---
+    # (Ensure Roboto-Regular.ttf and Roboto-Bold.ttf are in the same folder as this script)
+    pdfmetrics.registerFont(TTFont('Roboto', 'Roboto-Regular.ttf'))
+    pdfmetrics.registerFont(TTFont('Roboto-Bold', 'Roboto-Bold.ttf'))
+
+    # Tell ReportLab that Roboto-Bold is the bold version of Roboto
+    addMapping('Roboto', 0, 0, 'Roboto')       # Normal
+    addMapping('Roboto', 1, 0, 'Roboto-Bold')  # Bold
+
     HAS_REPORTLAB = True
 except ImportError:
     HAS_REPORTLAB = False
@@ -685,16 +699,16 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     elements = []
     
-    # Styles
-    title_style = ParagraphStyle('Title', fontName='Helvetica-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
-    subtitle_style = ParagraphStyle('Subtitle', fontName='Helvetica', fontSize=8, leading=10, alignment=1)
-    normal_style = ParagraphStyle('Normal', fontName='Helvetica', fontSize=9, leading=12)
-    bold_style = ParagraphStyle('Bold', fontName='Helvetica-Bold', fontSize=9, leading=12)
+   # --- UPDATED STYLES USING ROBOTO ---
+    title_style = ParagraphStyle('Title', fontName='Roboto-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
+    subtitle_style = ParagraphStyle('Subtitle', fontName='Roboto', fontSize=8, leading=10, alignment=1)
+    normal_style = ParagraphStyle('Normal', fontName='Roboto', fontSize=9, leading=12)
+    bold_style = ParagraphStyle('Bold', fontName='Roboto-Bold', fontSize=9, leading=12)
     
     # Custom styles for the accounting table
-    header_style = ParagraphStyle('HeaderStyle', fontName='Helvetica-Bold', fontSize=9, textColor=colors.white)
-    right_align_normal = ParagraphStyle('RightNormal', fontName='Helvetica', fontSize=9, alignment=2)
-    right_align_bold = ParagraphStyle('RightBold', fontName='Helvetica-Bold', fontSize=9, alignment=2)
+    header_style = ParagraphStyle('HeaderStyle', fontName='Roboto-Bold', fontSize=9, textColor=colors.white)
+    right_align_normal = ParagraphStyle('RightNormal', fontName='Roboto', fontSize=9, alignment=2)
+    right_align_bold = ParagraphStyle('RightBold', fontName='Roboto-Bold', fontSize=9, alignment=2)
     
     # Header
     elements.append(Paragraph("<b>TUANSON CONSTRUCTION</b>", title_style))
