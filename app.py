@@ -583,113 +583,84 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
 
 # --- APV PDF GENERATOR FUNCTION ---
 # --- REPORTLAB PDF GENERATOR FOR APV WITH DOUBLE ENTRY ---
-def create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt, conn):
-    from io import BytesIO
-    from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib import colors
-    
+# --- APV PDF GENERATOR FUNCTION ---
+def create_apv_pdf(apv_no, apv_date, supplier, project, po_number, dr_number, total_amount):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-    story = []
+    elements = []
     
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=16, alignment=1, textColor=colors.HexColor("#C0392B"))
-    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=10, alignment=1, textColor=colors.HexColor("#555555"))
-    bold_label = ParagraphStyle('BoldLabel', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9)
-    regular_val = ParagraphStyle('RegularVal', parent=styles['Normal'], fontName='Helvetica', fontSize=9)
-    table_header = ParagraphStyle('TableHeader', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white)
-    table_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=9)
-    table_cell_right = ParagraphStyle('TableCellRight', parent=styles['Normal'], fontName='Helvetica', fontSize=9, alignment=2)
+    # Styles using Roboto
+    title_style = ParagraphStyle('Title', fontName='Roboto-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
+    subtitle_style = ParagraphStyle('Subtitle', fontName='Roboto', fontSize=8, leading=10, alignment=1)
+    normal_style = ParagraphStyle('Normal', fontName='Roboto', fontSize=9, leading=12)
+    bold_style = ParagraphStyle('Bold', fontName='Roboto-Bold', fontSize=9, leading=12)
+    
+    # Custom styles for the accounting table
+    header_style = ParagraphStyle('HeaderStyle', fontName='Roboto-Bold', fontSize=9, textColor=colors.white)
+    right_align_normal = ParagraphStyle('RightNormal', fontName='Roboto', fontSize=9, alignment=2)
+    right_align_bold = ParagraphStyle('RightBold', fontName='Roboto-Bold', fontSize=9, alignment=2)
     
     # Header
-    story.append(Paragraph("TUANSON CONSTRUCTION", title_style))
-    story.append(Paragraph("Accounts Payable Voucher (APV)", subtitle_style))
-    story.append(Spacer(1, 15))
+    elements.append(Paragraph("<b>TUANSON CONSTRUCTION</b>", title_style))
+    elements.append(Paragraph("Accounts Payable Voucher (APV)", subtitle_style))
+    elements.append(Spacer(1, 15))
     
-    # Meta Info Table
+    # Meta Data Table
     meta_data = [
-        [Paragraph("APV NO:", bold_label), Paragraph(str(apv_no), regular_val), Paragraph("APV DATE:", bold_label), Paragraph(str(apv_date), regular_val)],
-        [Paragraph("SUPPLIER:", bold_label), Paragraph(str(supplier), regular_val), Paragraph("PROJECT:", bold_label), Paragraph(str(proj), regular_val)],
-        [Paragraph("PO NUMBER:", bold_label), Paragraph(str(po_no), regular_val), Paragraph("DR NUMBER:", bold_label), Paragraph(str(dr_no), regular_val)]
+        [Paragraph("<b>APV NO:</b>", bold_style), Paragraph(str(apv_no), normal_style), Paragraph("<b>APV DATE:</b>", bold_style), Paragraph(str(apv_date), normal_style)],
+        [Paragraph("<b>SUPPLIER:</b>", bold_style), Paragraph(str(supplier), normal_style), Paragraph("<b>PROJECT:</b>", bold_style), Paragraph(str(project), normal_style)],
+        [Paragraph("<b>PO NUMBER:</b>", bold_style), Paragraph(str(po_number), normal_style), Paragraph("<b>DR NUMBER:</b>", bold_style), Paragraph(str(dr_number), normal_style)]
     ]
-    meta_table = Table(meta_data, colWidths=[70, 190, 70, 210])
-    meta_table.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-    ]))
-    story.append(meta_table)
-    story.append(Spacer(1, 15))
+    meta_table = Table(meta_data, colWidths=[90, 180, 90, 180])
+    meta_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('BOTTOMPADDING', (0,0), (-1,-1), 4)]))
+    elements.append(meta_table)
+    elements.append(Spacer(1, 15))
     
-    # --- DOUBLE ENTRY ACCOUNTING TABLE ---
-    story.append(Paragraph("<b>Accounting Entries (General Ledger Distribution)</b>", bold_label))
-    story.append(Spacer(1, 5))
+    # Accounting Entries Title
+    elements.append(Paragraph("<b>Accounting Entries (General Ledger Distribution)</b>", bold_style))
+    elements.append(Spacer(1, 8))
     
-    # Query journal entries for this APV voucher number
-    c_cursor = conn.cursor()
-    entries = c_cursor.execute("""
-        SELECT account_code, account_name, debit, credit, description 
-        FROM journal_entries 
-        WHERE voucher_no = ?
-    """, (apv_no,)).fetchall()
+    # Double-Entry Table Data with Peso Sign Only (Removed parentheses)
+    table_data = [
+        [Paragraph("<b>Account Code & Name</b>", header_style), 
+         Paragraph("<b>Description</b>", header_style), 
+         Paragraph("<b>Debit ₱</b>", header_style), 
+         Paragraph("<b>Credit ₱</b>", header_style)],
+         
+        # Debit Row (Direct Cost Materials)
+        [Paragraph("<b>60200</b> - Direct Cost Materials", normal_style), 
+         Paragraph(f"APV setup for DR #{dr_number} ({supplier})", normal_style), 
+         Paragraph(f"₱{total_amount:,.2f}", right_align_normal), 
+         Paragraph("-", right_align_normal)],
+         
+        # Credit Row (Accounts Payable-Trade)
+        [Paragraph("<b>20100</b> - Accounts Payable-Trade", normal_style), 
+         Paragraph(f"APV liability accrued for DR #{dr_number}", normal_style), 
+         Paragraph("-", right_align_normal), 
+         Paragraph(f"₱{total_amount:,.2f}", right_align_normal)],
+         
+        # Total Row
+        [Paragraph("<b>TOTAL</b>", bold_style), 
+         "", 
+         Paragraph(f"<b>₱{total_amount:,.2f}</b>", right_align_bold), 
+         Paragraph(f"<b>₱{total_amount:,.2f}</b>", right_align_bold)]
+    ]
     
-    entry_table_data = [[
-        Paragraph("<b>Account Code & Name</b>", table_header),
-        Paragraph("<b>Description</b>", table_header),
-        Paragraph("<b>Debit (₱)</b>", table_header),
-        Paragraph("<b>Credit (₱)</b>", table_header)
-    ]]
-    
-    tot_debit = 0.0
-    tot_credit = 0.0
-    
-    if entries:
-        for row in entries:
-            acc_code, acc_name, debit, credit, desc = row
-            tot_debit += float(debit)
-            tot_credit += float(credit)
-            
-            d_str = f"₱{debit:,.2f}" if debit > 0 else "-"
-            c_str = f"₱{credit:,.2f}" if credit > 0 else "-"
-            
-            entry_table_data.append([
-                Paragraph(f"<b>{acc_code}</b> - {acc_name}", table_cell),
-                Paragraph(str(desc), table_cell),
-                Paragraph(d_str, table_cell_right),
-                Paragraph(c_str, table_cell_right)
-            ])
-    else:
-        # Fallback if entries not found in journal table yet
-        entry_table_data.append([
-            Paragraph("Standard Payable Accrual", table_cell),
-            Paragraph(f"APV for DR #{dr_no}", table_cell),
-            Paragraph(f"₱{total_amt:,.2f}", table_cell_right),
-            Paragraph("-", table_cell_right)
-        ])
-        tot_debit = total_amt
-        tot_credit = total_amt
-
-    # Totals row
-    entry_table_data.append([
-        Paragraph("<b>TOTAL</b>", table_cell),
-        Paragraph("", table_cell),
-        Paragraph(f"<b>₱{tot_debit:,.2f}</b>", table_cell_right),
-        Paragraph(f"<b>₱{tot_credit:,.2f}</b>", table_cell_right)
-    ])
-    
-    entry_table = Table(entry_table_data, colWidths=[170, 170, 90, 90])
-    entry_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
+    apv_table = Table(table_data, colWidths=[160, 200, 90, 90])
+    apv_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2c4356')), # Dark blue header
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#BDC3C7")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
         ('TOPPADDING', (0,0), (-1,-1), 6),
         ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor("#ECF0F1")),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.whitesmoke)
     ]))
-    story.append(entry_table)
     
-    doc.build(story)
+    elements.append(apv_table)
+    
+    doc.build(elements)
     buffer.seek(0)
     return buffer.getvalue()
 
