@@ -114,7 +114,7 @@ def init_db():
     except Exception:
         pass # Turso/libsql may safely ignore some PRAGMA statements
 
-  # 1. Projects Master Table
+    # 1. Projects Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_name TEXT UNIQUE
@@ -255,7 +255,8 @@ def init_db():
             qty_out REAL DEFAULT 0.0,
             balance REAL DEFAULT 0.0,
             location TEXT,
-            remarks TEXT
+            remarks TEXT,
+            status TEXT DEFAULT 'Completed'
         )
     ''')
 
@@ -286,7 +287,8 @@ def init_db():
         ("deliveries", "payment_method", "TEXT"),
         ("users", "can_add_act", "TEXT DEFAULT 'No'"),
         ("users", "can_add_item", "TEXT DEFAULT 'No'"),
-        ("users", "role6", "TEXT DEFAULT ''")
+        ("users", "role6", "TEXT DEFAULT ''"),
+        ("inventory_ledger", "status", "TEXT DEFAULT 'Completed'")
     ]:
         try:
             c.execute(f"ALTER TABLE {col_sql[0]} ADD COLUMN {col_sql[1]} {col_sql[2]}")
@@ -634,7 +636,6 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     return buffer.getvalue()
 
 # --- APV PDF GENERATOR FUNCTION ---
-# --- APV PDF GENERATOR FUNCTION ---
 def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, total_amount, conn=None):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -671,7 +672,7 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     elements.append(Paragraph("<b>Accounting Entries (General Ledger Distribution)</b>", bold_style))
     elements.append(Spacer(1, 8))
     
-    # Double-Entry Table Data with Peso Sign Only
+    # Double-Entry Table Data
     table_data = [
         [Paragraph("<b>Account Code & Name</b>", header_style), 
          Paragraph("<b>Description</b>", header_style), 
@@ -699,7 +700,7 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     
     apv_table = Table(table_data, colWidths=[160, 200, 90, 90])
     apv_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2c4356')), # Dark blue header
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2c4356')),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -721,13 +722,11 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     elements = []
     
-   # --- UPDATED STYLES USING ROBOTO ---
     title_style = ParagraphStyle('Title', fontName='Roboto-Bold', fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#CC0000"))
     subtitle_style = ParagraphStyle('Subtitle', fontName='Roboto', fontSize=8, leading=10, alignment=1)
     normal_style = ParagraphStyle('Normal', fontName='Roboto', fontSize=9, leading=12)
     bold_style = ParagraphStyle('Bold', fontName='Roboto-Bold', fontSize=9, leading=12)
     
-    # Custom styles for the accounting table
     header_style = ParagraphStyle('HeaderStyle', fontName='Roboto-Bold', fontSize=9, textColor=colors.white)
     right_align_normal = ParagraphStyle('RightNormal', fontName='Roboto', fontSize=9, alignment=2)
     right_align_bold = ParagraphStyle('RightBold', fontName='Roboto-Bold', fontSize=9, alignment=2)
@@ -752,44 +751,38 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount
     elements.append(Paragraph("<b>Accounting Entries (General Ledger Distribution)</b>", bold_style))
     elements.append(Spacer(1, 8))
     
-    # Double-Entry Table Data
-    # Note: Hardcoded account codes (20100 for AP, 10100 for Cash) are used as standard examples.
     table_data = [
         [Paragraph("<b>Account Code & Name</b>", header_style), 
          Paragraph("<b>Description</b>", header_style), 
          Paragraph("<b>Debit (₱)</b>", header_style), 
          Paragraph("<b>Credit (₱)</b>", header_style)],
          
-        # Debit Row (Accounts Payable)
         [Paragraph("<b>20100</b> - Accounts Payable-Trade", normal_style), 
          Paragraph(f"Payment settlement for APV #{apv_no} to {supplier}", normal_style), 
          Paragraph(f"₱{total_amount:,.2f}", right_align_normal), 
          Paragraph("-", right_align_normal)],
          
-        # Credit Row (Cash in Bank / Check)
         [Paragraph("<b>10100</b> - Cash in Bank", normal_style), 
          Paragraph(f"Payment issued via {payment_method}", normal_style), 
          Paragraph("-", right_align_normal), 
          Paragraph(f"₱{total_amount:,.2f}", right_align_normal)],
          
-        # Total Row
         [Paragraph("<b>TOTAL</b>", bold_style), 
          "", 
          Paragraph(f"<b>₱{total_amount:,.2f}</b>", right_align_bold), 
          Paragraph(f"<b>₱{total_amount:,.2f}</b>", right_align_bold)]
     ]
     
-    # Table Formatting to match the APV style
     cv_table = Table(table_data, colWidths=[160, 200, 90, 90])
     cv_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2c4356')), # Dark blue header
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2c4356')),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
         ('TOPPADDING', (0,0), (-1,-1), 6),
         ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('BACKGROUND', (0,-1), (-1,-1), colors.whitesmoke) # Slight gray for the totals row
+        ('BACKGROUND', (0,-1), (-1,-1), colors.whitesmoke)
     ]))
     
     elements.append(cv_table)
@@ -801,7 +794,6 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
 
-# Cloud Connection Management Using Factory
 conn = get_db_connection()
 c = conn.cursor()
 
@@ -862,7 +854,6 @@ role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.ava
 if role == "Requisitor":
     st.subheader(f"📋 Requisitor Dashboard - {st.session_state.current_user}")
     
-    # ADDED: "📦 Receive Incoming Items" tab to the Requisitor's tabs
     tab_request, tab_track, tab_receive = st.tabs(["📝 New Material Request", "🔍 Track My Requests", "📦 Receive Incoming Items"])
     
     with tab_request:
@@ -876,7 +867,6 @@ if role == "Requisitor":
             projects = ["No projects available"]
         selected_project = col_proj.selectbox("Project Name", projects)
         
-        # --- DYNAMIC ACTIVITY SELECTION WITH ADD OPTION ---
         act_query = """SELECT a.activity_name FROM activities a 
                        JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
         activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
@@ -895,7 +885,6 @@ if role == "Requisitor":
             new_activity_input = st.text_input("Enter New Activity Name")
             selected_activity = new_activity_input.strip()
 
-        # --- DYNAMIC MATERIAL SELECTION WITH ADD OPTION ---
         materials = c.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
         mat_options = {f"[{m[0]}] {m[1]}": (m[0], m[1], m[2], m[3]) for m in materials} if materials else {}
         
@@ -1039,75 +1028,73 @@ if role == "Requisitor":
         else:
             st.info("You haven't submitted any material requests yet.")
 
-# ADDED: New functionality for Requisitor to receive items
-        with tab_receive:
-            st.write("### 📦 Receive Incoming Site Dispatches")
-            st.info("Confirm the physical receipt of materials dispatched to your project site.")
+    with tab_receive:
+        st.write("### 📦 Receive Incoming Site Dispatches")
+        st.info("Confirm the physical receipt of materials dispatched to your project site.")
+        
+        if st.button("🔄 Refresh Dispatches", key="btn_refresh_receiving"):
+            st.rerun()
             
-            # Manual refresh button
-            if st.button("🔄 Refresh Dispatches", key="btn_refresh_receiving"):
-                st.rerun()
+        user_projects_df = pd.read_sql_query("""
+            SELECT DISTINCT project_name 
+            FROM requests 
+            WHERE requester_name = ? AND project_name IS NOT NULL AND project_name != ''
+        """, conn, params=(st.session_state.current_user,))
+        
+        user_projects = user_projects_df['project_name'].tolist() if not user_projects_df.empty else []
+        
+        if not user_projects:
+            st.warning("⚠️ No project history found for your account in requests. Please ensure you have made a project request first.")
+        else:
+            placeholders = ','.join(['?'] * len(user_projects))
+            query = f"""
+                SELECT 
+                    id,
+                    date AS 'Dispatch Date',
+                    ref_no AS 'Ref / MIF No.',
+                    item_description AS 'Item Description',
+                    qty_out AS 'Qty Dispatched',
+                    location AS 'Destination Project',
+                    remarks AS 'Remarks'
+                FROM inventory_ledger
+                WHERE qty_out > 0 
+                  AND status = 'Pending'
+                  AND location IN ({placeholders})
+            """
+            
+            pending_ledger_df = pd.read_sql_query(query, conn, params=tuple(user_projects))
+            
+            if not pending_ledger_df.empty:
+                st.dataframe(pending_ledger_df.drop(columns=['id']), use_container_width=True, hide_index=True)
                 
-            user_projects_df = pd.read_sql_query("""
-                SELECT DISTINCT project_name 
-                FROM requests 
-                WHERE requester_name = ? AND project_name IS NOT NULL AND project_name != ''
-            """, conn, params=(st.session_state.current_user,))
-            
-            user_projects = user_projects_df['project_name'].tolist() if not user_projects_df.empty else []
-            
-            if not user_projects:
-                st.warning("⚠️ No project history found for your account in requests. Please ensure you have made a project request first.")
+                st.write("#### ✅ Confirm Physical Receipt")
+                
+                options_dict = {
+                    row['id']: f"ID: {row['id']} | {row['Item Description']} ({row['Qty Dispatched']} units) - Ref: {row['Ref / MIF No.']} @ {row['Destination Project']}"
+                    for _, row in pending_ledger_df.iterrows()
+                }
+                
+                item_to_receive = st.selectbox(
+                    "Select Dispatch to Confirm", 
+                    options=list(options_dict.keys()),
+                    format_func=lambda x: options_dict[x]
+                )
+                
+                if st.button("Confirm Physical Receipt", type="primary"):
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    c.execute("""
+                        UPDATE inventory_ledger 
+                        SET status = 'Completed', 
+                            remarks = remarks || ' | Confirmed received on ' || ? 
+                        WHERE id = ?
+                    """, (current_time, item_to_receive))
+                    
+                    conn.commit()
+                    st.success("✅ Material receipt confirmed successfully!")
+                    st.rerun()
             else:
-                placeholders = ','.join(['?'] * len(user_projects))
-                query = f"""
-                    SELECT 
-                        id,
-                        date AS 'Dispatch Date',
-                        ref_no AS 'Ref / MIF No.',
-                        item_description AS 'Item Description',
-                        qty_out AS 'Qty Dispatched',
-                        location AS 'Destination Project',
-                        remarks AS 'Remarks'
-                    FROM inventory_ledger
-                    WHERE qty_out > 0 
-                      AND status = 'Pending'
-                      AND location IN ({placeholders})
-                """
-                
-                pending_ledger_df = pd.read_sql_query(query, conn, params=tuple(user_projects))
-                
-                if not pending_ledger_df.empty:
-                    st.dataframe(pending_ledger_df.drop(columns=['id']), use_container_width=True, hide_index=True)
-                    
-                    st.write("#### ✅ Confirm Physical Receipt")
-                    
-                    options_dict = {
-                        row['id']: f"ID: {row['id']} | {row['Item Description']} ({row['Qty Dispatched']} units) - Ref: {row['Ref / MIF No.']} @ {row['Destination Project']}"
-                        for _, row in pending_ledger_df.iterrows()
-                    }
-                    
-                    item_to_receive = st.selectbox(
-                        "Select Dispatch to Confirm", 
-                        options=list(options_dict.keys()),
-                        format_func=lambda x: options_dict[x]
-                    )
-                    
-                    if st.button("Confirm Physical Receipt", type="primary"):
-                        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        
-                        c.execute("""
-                            UPDATE inventory_ledger 
-                            SET status = 'Completed', 
-                                remarks = remarks || ' | Confirmed received on ' || ? 
-                            WHERE id = ?
-                        """, (current_time, item_to_receive))
-                        
-                        conn.commit()
-                        st.success("✅ Material receipt confirmed successfully!")
-                        st.rerun()
-                else:
-                    st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
+                st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
                     
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
@@ -1122,7 +1109,6 @@ elif role == "Purchaser":
     with tab_create_po:
         st.write("### 🛒 Batch Create P.O.")
         
-        # Manual refresh button for Tab 1
         if st.button("🔄 Refresh Pending Requests", key="btn_refresh_create_po"):
             st.rerun()
         
@@ -1244,7 +1230,6 @@ elif role == "Purchaser":
         st.write("### 🚚 Record Supplier Deliveries")
         st.info("Log items that have arrived on-site and upload attached Delivery Receipts (DR), Sales Invoices (SI), or Official Receipts (OR).")
 
-        # Manual refresh button for Tab 2
         if st.button("🔄 Refresh Deliveries", key="btn_refresh_receive_deliveries"):
             st.rerun()
         
@@ -1303,15 +1288,14 @@ elif role == "Purchaser":
                     c.execute("UPDATE requests SET received_status = 'Received', received_timestamp = ? WHERE pono = ?", 
                               (current_time, po_to_receive))
                     
-                    # --- AUTOMATIC INVENTORY LEDGER "QTY IN" ENTRY ---
                     received_items = c.execute("SELECT description, qty FROM requests WHERE pono = ?", (po_to_receive,)).fetchall()
                     for item_desc, r_qty in received_items:
                         qty_val = float(r_qty or 0.0)
                         prev_bal = get_latest_item_balance(c, item_desc)
                         new_bal = prev_bal + qty_val
                         c.execute("""
-                            INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks)
-                            VALUES (?, ?, ?, ?, 0.0, ?, ?, ?)
+                            INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks, status)
+                            VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, 'Completed')
                         """, (current_time, dr_number.strip(), item_desc, qty_val, new_bal, po_details['Project'], f"Received via DR #{dr_number.strip()} (PO #{po_to_receive})"))
 
                     conn.commit()
@@ -1377,11 +1361,9 @@ elif role == "Purchaser":
     with tab_ledger:
         st.write("### 🚚 Issue Materials to Site (Qty Out)")
         
-        # Manual refresh button for Tab 3
         if st.button("🔄 Refresh Ledger Data", key="btn_refresh_inventory_ledger"):
             st.rerun()
         
-        # Fetch list of unique items currently in inventory
         items_db = c.execute("SELECT DISTINCT item_description FROM inventory_ledger").fetchall()
         item_list = [i[0] for i in items_db] if items_db else []
 
@@ -1407,7 +1389,6 @@ elif role == "Purchaser":
                         dispatch_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         new_bal = current_stock - qty_to_issue
                         
-                        # UPDATED: Added 'status' to the columns and 'Pending' to the values
                         c.execute("""
                             INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks, status)
                             VALUES (?, ?, ?, 0.0, ?, ?, ?, ?, 'Pending')
@@ -1430,7 +1411,8 @@ elif role == "Purchaser":
                 qty_out AS 'Qty Out',
                 balance AS 'Balance',
                 location AS 'Location',
-                remarks AS 'Remarks'
+                remarks AS 'Remarks',
+                status AS 'Confirmation Status'
             FROM inventory_ledger
             ORDER BY id DESC
         """, conn)
@@ -1446,7 +1428,6 @@ elif role == "Purchaser":
                 hide_index=True
             )
             
-            # --- DOWNLOAD BUTTON FOR INVENTORY LEDGER ---
             csv_ledger = ledger_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Download Inventory Ledger as CSV",
@@ -1491,7 +1472,6 @@ elif role == "Purchaser":
 elif role == "Approver":
     st.subheader("✅ Approver Dashboard (Leizel Cabunilas)")
 
-    # Manual refresh button for Approver dashboard
     if st.button("🔄 Refresh Approval Queue", key="btn_refresh_approver_queue"):
         st.rerun()
         
@@ -1577,7 +1557,6 @@ elif role == "Approver":
 elif role == "Office Manager":
     st.subheader("📊 Office Manager Dashboard - Project Status & Expenses")
 
-    # Manual refresh button for Office Manager dashboard
     if st.button("🔄 Refresh Financial Data", key="btn_refresh_office_manager"):
         st.rerun()
     
@@ -1681,10 +1660,8 @@ elif role == "Office Manager":
     
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
-    # --- DOWNLOAD BUTTONS FOR OFFICE MANAGER SUMMARY ---
     col_dl1, col_dl2 = st.columns([1, 4])
     
-    # Flat single-level DataFrame export for Excel & CSV compatibility
     export_df = final_df.copy()
     export_df.columns = ['_'.join(col).strip() for col in export_df.columns.values]
     
@@ -1697,14 +1674,12 @@ elif role == "Office Manager":
     )
 
 # --- ROLE 5: ACCOUNTING ---
-# --- ROLE 5: ACCOUNTING (UPDATED WITH FINANCIAL STATEMENTS) ---
 elif role == "Accounting":
     st.subheader("🧾 Accounting Dashboard - Payables & Financial Reports")
     
     if st.button("🔄 Refresh Accounting Data", key="btn_refresh_accounting"):
         st.rerun()
     
-    # Updated to 5 tabs including Financial Statements
     tab_coa, tab_apv, tab_payment, tab_gl, tab_fs = st.tabs([
         "📊 Chart of Accounts", 
         "📝 Accounts Payable Voucher (APV)", 
@@ -1969,7 +1944,6 @@ elif role == "Accounting":
     with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
         
-        # Fetch journal entries and join with deliveries to map Supplier names
         gl_df = pd.read_sql_query("""
             SELECT 
                 j.id AS 'Entry ID', 
@@ -1987,7 +1961,6 @@ elif role == "Accounting":
             ORDER BY j.id DESC
         """, conn)
         
-        # Get list of unique suppliers from the deliveries table
         suppliers_df = pd.read_sql_query("SELECT DISTINCT supplier FROM deliveries WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC", conn)
         supplier_list = suppliers_df['supplier'].tolist() if not suppliers_df.empty else []
 
@@ -1995,7 +1968,6 @@ elif role == "Accounting":
             st.markdown("---")
             st.subheader("🔍 Filter & Subsummary")
             
-            # Filter Dropdowns
             col_f1, col_f2 = st.columns(2)
             
             all_accounts = ["All Account Titles"] + sorted(gl_df['Account Name'].dropna().unique().tolist())
@@ -2004,25 +1976,21 @@ elif role == "Accounting":
             all_suppliers = ["All Suppliers"] + sorted(supplier_list)
             selected_supplier = col_f2.selectbox("Filter by Supplier", all_suppliers, key="gl_filter_sup")
             
-            # Apply Filter Logic
             filtered_df = gl_df.copy()
             
             if selected_account != "All Account Titles":
                 filtered_df = filtered_df[filtered_df['Account Name'] == selected_account]
                 
             if selected_supplier != "All Suppliers":
-                # Matches either joined Supplier record or supplier name in Description text
                 filtered_df = filtered_df[
                     (filtered_df['Supplier'] == selected_supplier) | 
                     (filtered_df['Description'].str.contains(selected_supplier, case=False, na=False))
                 ]
 
-            # Dynamic Subsummary Calculations
             sub_debit = filtered_df["Debit"].sum()
             sub_credit = filtered_df["Credit"].sum()
             sub_net = sub_debit - sub_credit
 
-            # Display Subsummary Cards
             m1, m2, m3 = st.columns(3)
             m1.metric("Filtered Total Debits", f"₱{sub_debit:,.2f}")
             m2.metric("Filtered Total Credits", f"₱{sub_credit:,.2f}")
@@ -2030,7 +1998,6 @@ elif role == "Accounting":
             
             st.markdown("---")
             
-            # Render Table without internal helper column
             display_df = filtered_df.drop(columns=['Supplier'])
             st.dataframe(
                 display_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), 
@@ -2038,7 +2005,6 @@ elif role == "Accounting":
                 hide_index=True
             )
 
-            # CSV Download for filtered records
             csv_gl = display_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Download Filtered General Ledger as CSV",
@@ -2048,7 +2014,6 @@ elif role == "Accounting":
             )
         else:
             st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
-            
 
     # --- TAB 4: FINANCIAL STATEMENTS ---
     with tab_fs:
@@ -2056,7 +2021,6 @@ elif role == "Accounting":
         
         fs_tab1, fs_tab2 = st.tabs(["Income Statement", "Balance Sheet"])
 
-        # --- SUB-TAB 1: INCOME STATEMENT ---
         with fs_tab1:
             st.subheader("Income Statement (Profit & Loss)")
             col1, col2 = st.columns(2)
@@ -2087,14 +2051,12 @@ elif role == "Accounting":
             st.divider()
             st.metric("NET INCOME / (LOSS)", f"₱{net_income:,.2f}")
 
-        # --- SUB-TAB 2: BALANCE SHEET ---
         with fs_tab2:
             st.subheader("Balance Sheet")
             as_of = st.date_input("As of Date", pd.to_datetime("2026-12-31"))
 
             df_bs = get_balance_sheet(conn, as_of)
             
-            # Calculate Net Profit up to "as_of" date to close into Equity
             df_is_till_date = get_income_statement(conn, "1900-01-01", as_of)
             rev_until = df_is_till_date[df_is_till_date['account_type'] == 'Revenue']['amount'].sum() if not df_is_till_date.empty else 0.0
             exp_until = df_is_till_date[df_is_till_date['account_type'] == 'Expense']['amount'].sum() if not df_is_till_date.empty else 0.0
@@ -2133,10 +2095,9 @@ elif role == "Accounting":
             st.divider()
             balanced = abs(tot_assets - (tot_liab + tot_equity)) < 0.01
             if balanced:
-                st.success(f" Balance Check Passed: Total Assets (₱{tot_assets:,.2f}) = Liabilities + Equity (₱{tot_liab + tot_equity:,.2f})")
+                st.success(f"Balance Check Passed: Total Assets (₱{tot_assets:,.2f}) = Liabilities + Equity (₱{tot_liab + tot_equity:,.2f})")
             else:
                 st.error(f"⚠️ Unbalanced! Assets: ₱{tot_assets:,.2f} | Liabilities + Equity: ₱{tot_liab + tot_equity:,.2f}")
-            
 
 # --- ROLE 6: ADMIN VIEW ALL ---
 elif role == "Admin View All":
@@ -2295,201 +2256,120 @@ elif role == "Admin View All":
                     new_act = ac1.text_input("Activity Name / Description", key="new_act_name")
                     new_qty = ac2.number_input("Qty", min_value=0.0, value=1.0, step=1.0, key="new_act_qty")
                     new_unit = ac3.text_input("Unit", value="lot", key="new_act_unit")
-                    new_amount = ac4.number_input("Contract Amount (₱)", min_value=0.0, step=1000.0, format="%.2f", key="new_act_amt")
+                    new_amt = ac4.number_input("Contract Amount", min_value=0.0, step=100.0, key="new_act_amt")
                     
-                    if st.button("Add New Activity", type="primary", key="btn_add_act"):
+                    if st.button("➕ Add Activity", type="primary", key="btn_add_activity"):
                         if new_act.strip():
                             c.execute("""
-                                INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount) 
+                                INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount)
                                 VALUES (?, ?, ?, ?, ?)
-                            """, (project_id, new_act.strip(), new_qty, new_unit.strip(), new_amount))
+                            """, (project_id, new_act.strip(), new_qty, new_unit.strip(), new_amt))
                             conn.commit()
-                            st.success(f"Activity '{new_act.strip()}' added successfully!")
+                            st.success(f"Activity '{new_act}' added to project '{sel_proj_act}'!")
                             st.rerun()
                         else:
-                            st.warning("⚠️ Please provide an activity name.")      
+                            st.warning("Please enter an activity name.")
 
-        with st.expander("✍️ Manage Signatories & Signatures"):
-            st.write("#### ✒️ Edit Signatories & Signature Files")
-            signatories_df = pd.read_sql_query("SELECT id, name, role, signature_path FROM signatories", conn)
-            
-            edited_sigs_df = st.data_editor(
-                signatories_df,
+        with st.expander("📦 Manage Materials Master List"):
+            st.write("#### 📝 Edit & Manage Materials")
+            mats_df = pd.read_sql_query("SELECT item_no, description, unit, category FROM materials", conn)
+            edited_mats = st.data_editor(
+                mats_df,
+                num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "id": None,
-                    "name": "Signatory Name",
-                    "role": st.column_config.SelectboxColumn("Role", options=["Preparer", "Approver"], required=True),
-                    "signature_path": "Signature File Name"
-                },
-                key="sig_editor"
+                    "item_no": st.column_config.TextColumn("Item No.", required=True),
+                    "description": st.column_config.TextColumn("Description", required=True),
+                    "unit": st.column_config.TextColumn("Unit", default="PCS"),
+                    "category": st.column_config.SelectboxColumn("Category", options=["Direct Materials", "Equipment & Rental", "Tools & Consumables", "Fuel & Lubricants", "Subcontract & Services"], default="Direct Materials")
+                }
             )
-            
-            if st.button("💾 Save Signatories Changes", type="primary", key="save_sigs_btn"):
-                for _, row in edited_sigs_df.iterrows():
-                    c.execute("""
-                        UPDATE signatories 
-                        SET name = ?, role = ?, signature_path = ? 
-                        WHERE id = ?
-                    """, (row['name'], row['role'], row['signature_path'], row['id']))
+            if st.button("💾 Save Materials List", type="primary"):
+                c.execute("DELETE FROM materials")
+                for _, r in edited_mats.iterrows():
+                    item_no = str(r['item_no']).strip() if pd.notnull(r['item_no']) else ""
+                    desc = str(r['description']).strip() if pd.notnull(r['description']) else ""
+                    unit = str(r['unit']).strip() if pd.notnull(r['unit']) else "PCS"
+                    cat = str(r['category']).strip() if pd.notnull(r['category']) else "Direct Materials"
+                    if item_no and desc:
+                        c.execute("INSERT OR REPLACE INTO materials (item_no, description, unit, category) VALUES (?, ?, ?, ?)", (item_no, desc, unit, cat))
                 conn.commit()
-                st.success("Signatories updated successfully!")
+                st.success("Materials list updated!")
                 st.rerun()
 
-        with st.expander("📦 Add New Material Item"):
-            all_items = [r[0] for r in c.execute("SELECT item_no FROM materials").fetchall() if r[0] and r[0].isdigit()]
-            suggested_item_no = str(max([int(x) for x in all_items]) + 1).zfill(5) if all_items else "00001"
+        with st.expander("🏬 Manage Suppliers Master List"):
+            st.write("#### 📝 Edit & Manage Suppliers")
+            sups_df = pd.read_sql_query("SELECT id, supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days FROM suppliers", conn)
+            edited_sups = st.data_editor(
+                sups_df,
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                column_config={"id": None}
+            )
+            if st.button("💾 Save Suppliers List", type="primary"):
+                c.execute("DELETE FROM suppliers")
+                for _, r in edited_sups.iterrows():
+                    s_name = str(r['supplier_name']).strip() if pd.notnull(r['supplier_name']) else ""
+                    if s_name:
+                        c.execute("""
+                            INSERT INTO suppliers (supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            s_name,
+                            str(r.get('location', '') or ''),
+                            str(r.get('contact_person', '') or ''),
+                            str(r.get('contact_number', '') or ''),
+                            str(r.get('tin_number', '') or ''),
+                            str(r.get('vat_type', '') or 'VAT Registered'),
+                            int(r.get('terms_days', 0) or 0)
+                        ))
+                conn.commit()
+                st.success("Suppliers list updated!")
+                st.rerun()
 
-            mc1, mc2 = st.columns(2)
-            mat_item_no = mc1.text_input("Item Number", value=suggested_item_no)
-            mat_desc = mc2.text_input("Description")
-            
-            mc3, mc4 = st.columns(2)
-            mat_unit = mc3.text_input("Unit", value="PCS")
-            category_options = ["Direct Materials", "Equipment & Rental", "Tools & Consumables", "Fuel & Lubricants", "Subcontract & Services"]
-            mat_category = mc4.selectbox("Category", category_options)
-            
-            if st.button("Save Material Item", type="primary"):
-                if mat_item_no.strip() and mat_desc.strip():
-                    c.execute("""
-                        INSERT INTO materials (item_no, description, unit, category)
-                        VALUES (?, ?, ?, ?)
-                        ON CONFLICT(item_no) DO UPDATE SET
-                            description = excluded.description,
-                            unit = excluded.unit,
-                            category = excluded.category
-                    """, (mat_item_no.strip(), mat_desc.strip(), mat_unit.strip(), mat_category))
-                    conn.commit()
-                    st.success(f"Item '{mat_desc}' saved successfully!")
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Please fill in both Item Number and Description.")
-
-        with st.expander("🚚 Add & Manage Suppliers"):
-            suppliers_list = [s[0] for s in c.execute("SELECT supplier_name FROM suppliers ORDER BY supplier_name ASC").fetchall()]
-            supplier_edit_options = ["-- Register New Supplier --"] + suppliers_list
-            selected_supplier_to_edit = st.selectbox("Select Supplier to Edit", supplier_edit_options)
-            
-            edit_name, edit_loc, edit_contact_person, edit_contact_no, edit_tin, edit_vat, edit_terms = "", "", "", "", "", "VAT Registered", 0
-            
-            if selected_supplier_to_edit != "-- Register New Supplier --":
-                sup_data = c.execute("SELECT supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days FROM suppliers WHERE supplier_name = ?", (selected_supplier_to_edit,)).fetchone()
-                if sup_data:
-                    edit_name, edit_loc, edit_contact_person, edit_contact_no, edit_tin, edit_vat, edit_terms = sup_data[0], sup_data[1] or "", sup_data[2] or "", sup_data[3] or "", sup_data[4] or "", sup_data[5] or "VAT Registered", int(sup_data[6] or 0)
-
-            sc1, sc2 = st.columns(2)
-            sup_name = sc1.text_input("Supplier Name", value=edit_name)
-            sup_location = sc2.text_input("Location / Address", value=edit_loc)
-            
-            sc3, sc4 = st.columns(2)
-            sup_contact_person = sc3.text_input("Contact Person", value=edit_contact_person)
-            sup_contact_number = sc4.text_input("Contact Number", value=edit_contact_no)
-            
-            sc5, sc6 = st.columns(2)
-            sup_tin = sc5.text_input("TIN Number", value=edit_tin)
-            sup_vat = sc6.selectbox("VAT Status", ["VAT Registered", "Non-VAT"], index=0 if edit_vat == "VAT Registered" else 1)
-            sup_terms = st.number_input("Payment Terms (Days)", min_value=0, value=edit_terms, step=1)
-            
-            btn_label = "Update Supplier Details" if selected_supplier_to_edit != "-- Register New Supplier --" else "Save New Supplier"
-            
-            if st.button(btn_label, type="primary"):
-                if sup_name.strip():
-                    c.execute("""
-                        INSERT INTO suppliers (supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(supplier_name) DO UPDATE SET
-                            location = excluded.location,
-                            contact_person = excluded.contact_person,
-                            contact_number = excluded.contact_number,
-                            tin_number = excluded.tin_number,
-                            vat_type = excluded.vat_type,
-                            terms_days = excluded.terms_days
-                    """, (sup_name.strip(), sup_location.strip(), sup_contact_person.strip(), sup_contact_number.strip(), sup_tin.strip(), sup_vat, sup_terms))
-                    conn.commit()
-                    st.success(f"Supplier '{sup_name.strip()}' saved successfully!")
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Please provide a supplier name.")
-
-        # --- SOURCE CODE EXPORT TOOL ---
-        with st.expander("💾 Backup & Download Python Source Code (app.py)"):
-            st.write("Download a copy of this script (`app.py`) directly from the system.")
-            if os.path.exists(__file__):
-                with open(__file__, "rb") as f:
-                    code_bytes = f.read()
-                st.download_button(
-                    label="📥 Download Full app.py Source Code",
-                    data=code_bytes,
-                    file_name="app.py",
-                    mime="text/x-python"
-                )
-            else:
-                st.info("Source script path not accessible locally.")
+        with st.expander("✍️ Manage Signatories"):
+            sigs_df = pd.read_sql_query("SELECT id, name, role, signature_path FROM signatories", conn)
+            edited_sigs = st.data_editor(sigs_df, num_rows="dynamic", use_container_width=True, hide_index=True, column_config={"id": None})
+            if st.button("💾 Save Signatories"):
+                c.execute("DELETE FROM signatories")
+                for _, r in edited_sigs.iterrows():
+                    if pd.notnull(r['name']) and str(r['name']).strip():
+                        c.execute("INSERT INTO signatories (name, role, signature_path) VALUES (?, ?, ?)",
+                                  (str(r['name']).strip(), str(r['role']).strip(), str(r['signature_path']).strip()))
+                conn.commit()
+                st.success("Signatories updated!")
+                st.rerun()
 
     with tab_reports:
-        st.write("### 📊 Project Approved Reports & Audit Trail")
-        report_df = pd.read_sql_query("""
-            SELECT 
-                timestamp AS 'Date Requested',
-                project_name AS 'Project',
-                activity AS 'Activity',
-                item_no AS 'Item No',
-                description AS 'Description',
-                qty AS 'Qty',
-                unit AS 'Unit',
-                price AS 'Price',
-                amount AS 'Total Amount',
-                supplier AS 'Supplier',
-                pono AS 'P.O. No.',
-                status AS 'Status',
-                approved_by AS 'Approved By',
-                approved_timestamp AS 'Approval Date'
-            FROM requests
-            WHERE status != 'Pending Purchaser'
-            ORDER BY timestamp DESC
+        st.write("### 📊 Comprehensive Project Reports")
+        all_reqs = pd.read_sql_query("""
+            SELECT id, timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, requester_name, supplier, pono, status, received_status, payment_status
+            FROM requests ORDER BY id DESC
         """, conn)
+        st.dataframe(all_reqs, use_container_width=True, hide_index=True)
         
-        if not report_df.empty:
-            st.dataframe(report_df.style.format({"Price": "₱{:,.2f}", "Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
-            
-            csv_data = report_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Procurement Report as CSV",
-                data=csv_data,
-                file_name=f"procurement_report_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No approved or ongoing transaction records found.")
+        csv_reqs = all_reqs.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Export All Request Records (CSV)",
+            data=csv_reqs,
+            file_name=f"all_requests_report_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
 
     with tab_payables:
-        st.write("### 💸 Accounts Payable Summary & Aging")
-        ap_summary_df = pd.read_sql_query("""
-            SELECT 
-                pono AS 'PO Number',
-                apv_number AS 'APV Number',
-                supplier AS 'Supplier',
-                project_name AS 'Project',
-                total_amount AS 'Amount',
-                payment_status AS 'Payment Status',
-                cv_number AS 'CV Number',
-                payment_method AS 'Payment Method'
-            FROM deliveries
-            WHERE apv_number IS NOT NULL AND apv_number != ''
-            ORDER BY received_date DESC
+        st.write("### 💸 Master Accounts Payable Overview")
+        del_ap = pd.read_sql_query("""
+            SELECT id, pono, dr_number, supplier, project_name, total_amount, received_date, apv_number, cv_number, payment_status, payment_method
+            FROM deliveries ORDER BY id DESC
         """, conn)
+        st.dataframe(del_ap.style.format({"total_amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
         
-        if not ap_summary_df.empty:
-            st.dataframe(ap_summary_df.style.format({"Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
-
-            # --- DOWNLOAD BUTTON FOR ACCOUNTS PAYABLE SUMMARY ---
-            csv_ap = ap_summary_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Accounts Payable Summary as CSV",
-                data=csv_ap,
-                file_name=f"accounts_payable_summary_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No Accounts Payable vouchers recorded yet.")
+        csv_ap = del_ap.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Export Accounts Payable Report (CSV)",
+            data=csv_ap,
+            file_name=f"accounts_payable_report_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
