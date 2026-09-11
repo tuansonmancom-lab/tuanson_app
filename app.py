@@ -582,9 +582,8 @@ def create_po_pdf(pono, date_str, supplier, project, po_items):
     return buffer.getvalue()
 
 # --- APV PDF GENERATOR FUNCTION ---
-# --- REPORTLAB PDF GENERATOR FOR APV WITH DOUBLE ENTRY ---
 # --- APV PDF GENERATOR FUNCTION ---
-def create_apv_pdf(apv_no, apv_date, supplier, project, po_number, dr_number, total_amount):
+def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, total_amount, conn=None):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     elements = []
@@ -620,7 +619,7 @@ def create_apv_pdf(apv_no, apv_date, supplier, project, po_number, dr_number, to
     elements.append(Paragraph("<b>Accounting Entries (General Ledger Distribution)</b>", bold_style))
     elements.append(Spacer(1, 8))
     
-    # Double-Entry Table Data with Peso Sign Only (Removed parentheses)
+    # Double-Entry Table Data with Peso Sign Only
     table_data = [
         [Paragraph("<b>Account Code & Name</b>", header_style), 
          Paragraph("<b>Description</b>", header_style), 
