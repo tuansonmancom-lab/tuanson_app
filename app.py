@@ -64,7 +64,7 @@ def init_db():
     except Exception:
         pass # Turso/libsql may safely ignore some PRAGMA statements
 
-   # 1. Projects Master Table
+  # 1. Projects Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_name TEXT UNIQUE
