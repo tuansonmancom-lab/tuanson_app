@@ -68,7 +68,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_name TEXT UNIQUE
-                ''')
+            )''')
     
     # 2. Activities Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS activities (
@@ -79,7 +79,7 @@ def init_db():
                 unit TEXT DEFAULT 'lot',
                 contract_amount REAL DEFAULT 0.0,
                 FOREIGN KEY(project_id) REFERENCES projects(id))'''
-             )
+              )
 
     # 3. Materials Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS materials (
