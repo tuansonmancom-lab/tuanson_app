@@ -1783,38 +1783,35 @@ elif role == "Accounting":
                     po_no = selected_del['PO Number']
                     supplier_name = selected_del['Supplier']
                     
-                    # --- NEW LOGIC: Fetch Activity and Particulars from PO ---
-                    # Assuming your PO details are stored in the 'requests' table. 
-                    # If they are in a different table, change 'requests' below.
+                    # Fetch Activity and Particulars with text length safety truncation (>30 chars -> 25 chars + "...")
                     po_details = c.execute("SELECT activity, particulars FROM requests WHERE pono = ?", (po_no,)).fetchall()
+                    po_desc_string = ""
                     
                     if po_details:
-                        # Combine multiple items if they exist on the PO
-                        desc_parts = [f"{row[0]}: {row[1]}" for row in po_details if row[0] and row[1]]
-                        po_desc_string = " | ".join(desc_parts)
-                        
-                        # Format the final descriptions for the General Ledger
-                        debit_desc = f"APV setup for DR #{dr_to_apv} | {po_desc_string} ({supplier_name})"
-                        credit_desc = f"APV liability accrued for DR #{dr_to_apv} | {po_desc_string}"
-                    else:
-                        # Fallback if no activity/particulars are found
-                        debit_desc = f"APV setup for DR #{dr_to_apv} ({supplier_name})"
-                        credit_desc = f"APV liability accrued for DR #{dr_to_apv}"
+                        desc_parts = []
+                        for act, part in po_details:
+                            item_desc = " - ".join([str(x) for x in [act, part] if x])
+                            if item_desc:
+                                if len(item_desc) > 30:
+                                    item_desc = item_desc[:25] + "..."
+                                desc_parts.append(item_desc)
+                        if desc_parts:
+                            po_desc_string = " - " + " | ".join(desc_parts)
                     
-                    # 1. Update the deliveries table
+                    debit_desc = f"APV setup for DR #{dr_to_apv} ({supplier_name}){po_desc_string}"
+                    credit_desc = f"APV liability accrued for DR #{dr_to_apv}{po_desc_string}"
+                    
                     c.execute("""
                         UPDATE deliveries 
                         SET apv_number = ?, apv_date = ? 
                         WHERE dr_number = ?
                     """, (apv_input.strip(), current_time, dr_to_apv))
                     
-                    # 2. Post Debit Entry (Using the NEW highly detailed description)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                         VALUES (?, ?, ?, ?, ?, 0.0, ?, ?)
                     """, (current_time, apv_input.strip(), selected_acc_code, selected_acc_name, total_amt, dr_to_apv, debit_desc))
                     
-                    # 3. Post Credit Entry (Using the NEW highly detailed description)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                         VALUES (?, ?, '20100', 'Accounts Payable-Trade', 0.0, ?, ?, ?)
@@ -1907,6 +1904,26 @@ elif role == "Accounting":
                     
                     selected_pay = pay_df[pay_df['APV Number'] == apv_to_pay].iloc[0]
                     pay_amt = float(selected_pay['Total Amount'])
+                    po_no = selected_pay['PO Number']
+                    supplier_name = selected_pay['Supplier']
+                    
+                    # Fetch Activity and Particulars with text length safety truncation (>30 chars -> 25 chars + "...")
+                    po_details = c.execute("SELECT activity, particulars FROM requests WHERE pono = ?", (po_no,)).fetchall()
+                    po_desc_string = ""
+                    
+                    if po_details:
+                        desc_parts = []
+                        for act, part in po_details:
+                            item_desc = " - ".join([str(x) for x in [act, part] if x])
+                            if item_desc:
+                                if len(item_desc) > 30:
+                                    item_desc = item_desc[:25] + "..."
+                                desc_parts.append(item_desc)
+                        if desc_parts:
+                            po_desc_string = " - " + " | ".join(desc_parts)
+                    
+                    cv_debit_desc = f"Settlement of APV #{apv_to_pay} ({supplier_name}){po_desc_string}"
+                    cv_credit_desc = f"Payment release via {pay_method}{po_desc_string}"
                     
                     c.execute("""
                         UPDATE deliveries 
@@ -1914,17 +1931,17 @@ elif role == "Accounting":
                         WHERE apv_number = ?
                     """, (cv_input.strip(), current_time, pay_method, apv_to_pay))
                     
-                    c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_pay['PO Number'],))
+                    c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (po_no,))
                     
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                         VALUES (?, ?, '20100', 'Accounts Payable-Trade', ?, 0.0, ?, ?)
-                    """, (current_time, cv_input.strip(), pay_amt, apv_to_pay, f"Settlement of APV #{apv_to_pay} ({selected_pay['Supplier']})"))
+                    """, (current_time, cv_input.strip(), pay_amt, apv_to_pay, cv_debit_desc))
                     
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                         VALUES (?, ?, ?, ?, 0.0, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, pay_amt, apv_to_pay, f"Payment release via {pay_method}"))
+                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, pay_amt, apv_to_pay, cv_credit_desc))
                     
                     conn.commit()
                     st.success(f"🎉 Voucher {cv_input.strip()} completed! Payment cleared for APV #{apv_to_pay}.")
@@ -1965,7 +1982,6 @@ elif role == "Accounting":
     with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
         
-        # --- UPGRADED: Added Project Name column via COALESCE ---
         gl_df = pd.read_sql_query("""
             SELECT 
                 j.id AS 'Entry ID', 
@@ -1991,7 +2007,6 @@ elif role == "Accounting":
             st.markdown("---")
             st.subheader("🔍 Filter & Subsummary")
             
-            # --- UPGRADED: 3 Columns to include Project Name Filter ---
             col_f1, col_f2, col_f3 = st.columns(3)
             
             all_accounts = ["All Account Titles"] + sorted(gl_df['Account Name'].dropna().unique().tolist())
@@ -2000,7 +2015,6 @@ elif role == "Accounting":
             all_suppliers = ["All Suppliers"] + sorted(supplier_list)
             selected_supplier = col_f2.selectbox("Filter by Supplier", all_suppliers, key="gl_filter_sup")
             
-            # Create Project Filter list
             project_list = sorted([str(p) for p in gl_df['Project Name'].dropna().unique().tolist() if str(p).strip() != ''])
             all_projects = ["All Projects"] + project_list
             selected_project = col_f3.selectbox("Filter by Project", all_projects, key="gl_filter_proj")
@@ -2016,7 +2030,6 @@ elif role == "Accounting":
                     (filtered_df['Description'].str.contains(selected_supplier, case=False, na=False))
                 ]
                 
-            # Apply Project Filter logic
             if selected_project != "All Projects":
                 filtered_df = filtered_df[filtered_df['Project Name'] == selected_project]
 
@@ -2031,7 +2044,6 @@ elif role == "Accounting":
             
             st.markdown("---")
             
-            # Dropping internal helper columns but keeping Project Name visible
             display_df = filtered_df.drop(columns=['Supplier'])
             st.dataframe(
                 display_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), 
