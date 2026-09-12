@@ -1780,24 +1780,45 @@ elif role == "Accounting":
                     
                     selected_del = apv_df[apv_df['DR Number'] == dr_to_apv].iloc[0]
                     total_amt = float(selected_del['Total Amount'])
+                    po_no = selected_del['PO Number']
+                    supplier_name = selected_del['Supplier']
                     
+                    # --- NEW LOGIC: Fetch Activity and Particulars from PO ---
+                    # Assuming your PO details are stored in the 'requests' table. 
+                    # If they are in a different table, change 'requests' below.
+                    po_details = c.execute("SELECT activity, particulars FROM requests WHERE pono = ?", (po_no,)).fetchall()
+                    
+                    if po_details:
+                        # Combine multiple items if they exist on the PO
+                        desc_parts = [f"{row[0]}: {row[1]}" for row in po_details if row[0] and row[1]]
+                        po_desc_string = " | ".join(desc_parts)
+                        
+                        # Format the final descriptions for the General Ledger
+                        debit_desc = f"APV setup for DR #{dr_to_apv} | {po_desc_string} ({supplier_name})"
+                        credit_desc = f"APV liability accrued for DR #{dr_to_apv} | {po_desc_string}"
+                    else:
+                        # Fallback if no activity/particulars are found
+                        debit_desc = f"APV setup for DR #{dr_to_apv} ({supplier_name})"
+                        credit_desc = f"APV liability accrued for DR #{dr_to_apv}"
+                    
+                    # 1. Update the deliveries table
                     c.execute("""
                         UPDATE deliveries 
                         SET apv_number = ?, apv_date = ? 
                         WHERE dr_number = ?
                     """, (apv_input.strip(), current_time, dr_to_apv))
                     
-                    # Post Debit Entry
+                    # 2. Post Debit Entry (Using the NEW highly detailed description)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                         VALUES (?, ?, ?, ?, ?, 0.0, ?, ?)
-                    """, (current_time, apv_input.strip(), selected_acc_code, selected_acc_name, total_amt, dr_to_apv, f"APV setup for DR #{dr_to_apv} ({selected_del['Supplier']})"))
+                    """, (current_time, apv_input.strip(), selected_acc_code, selected_acc_name, total_amt, dr_to_apv, debit_desc))
                     
-                    # Post Credit Entry
+                    # 3. Post Credit Entry (Using the NEW highly detailed description)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
                         VALUES (?, ?, '20100', 'Accounts Payable-Trade', 0.0, ?, ?, ?)
-                    """, (current_time, apv_input.strip(), total_amt, dr_to_apv, f"APV liability accrued for DR #{dr_to_apv}"))
+                    """, (current_time, apv_input.strip(), total_amt, dr_to_apv, credit_desc))
                     
                     conn.commit()
                     st.success(f"🎉 Voucher {apv_input.strip()} recorded successfully for DR #{dr_to_apv}!")
@@ -1944,6 +1965,7 @@ elif role == "Accounting":
     with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
         
+        # --- UPGRADED: Added Project Name column via COALESCE ---
         gl_df = pd.read_sql_query("""
             SELECT 
                 j.id AS 'Entry ID', 
@@ -1955,6 +1977,7 @@ elif role == "Accounting":
                 j.credit AS 'Credit', 
                 j.ref_no AS 'Ref Doc', 
                 j.description AS 'Description',
+                COALESCE(d.project_name, '') AS 'Project Name',
                 COALESCE(d.supplier, '') AS 'Supplier'
             FROM journal_entries j
             LEFT JOIN deliveries d ON (j.ref_no = d.dr_number OR j.ref_no = d.apv_number OR j.ref_no = d.cv_number)
@@ -1968,13 +1991,19 @@ elif role == "Accounting":
             st.markdown("---")
             st.subheader("🔍 Filter & Subsummary")
             
-            col_f1, col_f2 = st.columns(2)
+            # --- UPGRADED: 3 Columns to include Project Name Filter ---
+            col_f1, col_f2, col_f3 = st.columns(3)
             
             all_accounts = ["All Account Titles"] + sorted(gl_df['Account Name'].dropna().unique().tolist())
             selected_account = col_f1.selectbox("Filter by Account Title", all_accounts, key="gl_filter_acc")
             
             all_suppliers = ["All Suppliers"] + sorted(supplier_list)
             selected_supplier = col_f2.selectbox("Filter by Supplier", all_suppliers, key="gl_filter_sup")
+            
+            # Create Project Filter list
+            project_list = sorted([str(p) for p in gl_df['Project Name'].dropna().unique().tolist() if str(p).strip() != ''])
+            all_projects = ["All Projects"] + project_list
+            selected_project = col_f3.selectbox("Filter by Project", all_projects, key="gl_filter_proj")
             
             filtered_df = gl_df.copy()
             
@@ -1986,6 +2015,10 @@ elif role == "Accounting":
                     (filtered_df['Supplier'] == selected_supplier) | 
                     (filtered_df['Description'].str.contains(selected_supplier, case=False, na=False))
                 ]
+                
+            # Apply Project Filter logic
+            if selected_project != "All Projects":
+                filtered_df = filtered_df[filtered_df['Project Name'] == selected_project]
 
             sub_debit = filtered_df["Debit"].sum()
             sub_credit = filtered_df["Credit"].sum()
@@ -1998,6 +2031,7 @@ elif role == "Accounting":
             
             st.markdown("---")
             
+            # Dropping internal helper columns but keeping Project Name visible
             display_df = filtered_df.drop(columns=['Supplier'])
             st.dataframe(
                 display_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), 
