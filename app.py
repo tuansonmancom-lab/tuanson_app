@@ -1852,7 +1852,7 @@ elif role == "Accounting":
         else:
             st.info("No generated APVs available for printing yet.")
 
-    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
+   # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
         st.write("### 💳 Outstanding Payables with Approved APV")
         st.info("Process payments for vouchered liabilities via Cash or Check.")
@@ -1907,7 +1907,8 @@ elif role == "Accounting":
                     po_no = selected_pay['PO Number']
                     supplier_name = selected_pay['Supplier']
                     
-                    po_details = c.execute("SELECT activity, particulars FROM requests WHERE pono = ?", (po_no,)).fetchall()
+                    # FIXED: Using "Description" instead of "particulars" to match your table schema
+                    po_details = c.execute("SELECT activity, Description FROM requests WHERE pono = ?", (po_no,)).fetchall()
                     po_desc_string = ""
                     
                     if po_details:
