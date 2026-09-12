@@ -1728,7 +1728,7 @@ elif role == "Accounting":
         else:
             st.info("No accounts found in the Chart of Accounts.")
 
-   # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
+    # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
     with tab_apv:
         st.write("### 📦 Received Deliveries Awaiting APV Generation")
         st.info("Receiving tab logs received items. Generate APV here to record Accounts Payable in the General Ledger.")
@@ -1783,7 +1783,6 @@ elif role == "Accounting":
                     po_no = selected_del['PO Number']
                     supplier_name = selected_del['Supplier']
                     
-                    # FIXED: Using "Description" instead of "particulars" to match your table schema
                     po_details = c.execute("SELECT activity, Description FROM requests WHERE pono = ?", (po_no,)).fetchall()
                     po_desc_string = ""
                     
@@ -1852,7 +1851,7 @@ elif role == "Accounting":
         else:
             st.info("No generated APVs available for printing yet.")
 
-   # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
+    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
         st.write("### 💳 Outstanding Payables with Approved APV")
         st.info("Process payments for vouchered liabilities via Cash or Check.")
@@ -1907,7 +1906,7 @@ elif role == "Accounting":
                     po_no = selected_pay['PO Number']
                     supplier_name = selected_pay['Supplier']
                     
-                    # FIXED: Using "Description" instead of "particulars" to match your table schema
+                    # FIXED: Using "Description" instead of "particulars" to match your schema
                     po_details = c.execute("SELECT activity, Description FROM requests WHERE pono = ?", (po_no,)).fetchall()
                     po_desc_string = ""
                     
