@@ -82,6 +82,42 @@ try:
 except ImportError:
     HAS_REPORTLAB = False
 
+def generate_voucher_number(c, column_name, prefix):
+    """
+    Safely finds the highest sequence number for a given prefix (e.g., APV, CV, CAV)
+    from both deliveries and journal_entries tables and increments it by 1.
+    """
+    max_num = 0
+    try:
+        c.execute(f"SELECT DISTINCT {column_name} FROM deliveries WHERE {column_name} LIKE '{prefix}-%'")
+        for row in c.fetchall():
+            if row[0]:
+                parts = row[0].split('-')
+                if len(parts) > 1:
+                    try:
+                        num = int(parts[-1])
+                        if num > max_num:
+                            max_num = num
+                    except ValueError:
+                        continue
+                        
+        c.execute(f"SELECT DISTINCT voucher_no FROM journal_entries WHERE voucher_no LIKE '{prefix}-%'")
+        for row in c.fetchall():
+            if row[0]:
+                parts = row[0].split('-')
+                if len(parts) > 1:
+                    try:
+                        num = int(parts[-1])
+                        if num > max_num:
+                            max_num = num
+                    except ValueError:
+                        continue
+    except Exception:
+        pass
+        
+    next_num = max_num + 1
+    return f"{prefix}-{next_num:05d}"
+
 # --- DATABASE SETUP (Turso / SQLite Integrated) ---
 @st.cache_resource
 def get_db_connection():
