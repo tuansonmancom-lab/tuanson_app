@@ -1748,9 +1748,19 @@ elif role == "Accounting":
             st.write("#### 📑 Generate APV Document")
             col1, col2, col3 = st.columns(3)
             
+            #dr_to_apv = col1.selectbox("Select DR Number to Voucher", apv_df['DR Number'].tolist())
+            #suggested_apv = generate_voucher_number(c, "apv_number", "APV")
+            #apv_input = col2.text_input("APV Number Sequence", value=suggested_apv)
+
             dr_to_apv = col1.selectbox("Select DR Number to Voucher", apv_df['DR Number'].tolist())
             suggested_apv = generate_voucher_number(c, "apv_number", "APV")
-            apv_input = col2.text_input("APV Number Sequence", value=suggested_apv)
+            
+            # Added dynamic key so Streamlit updates the field on every rerun/increment
+            apv_input = col2.text_input(
+                "APV Number Sequence", 
+                value=suggested_apv, 
+                key=f"apv_input_{suggested_apv}"
+            )
             
             expense_accounts = c.execute("SELECT account_code, account_name FROM chart_of_accounts WHERE account_type = 'Expense'").fetchall()
             
@@ -1869,6 +1879,16 @@ elif role == "Accounting":
             
             st.markdown("---")
             st.write("#### 💸 Process Payment & Generate Check Voucher")
+
+            prefix = "CV" if pay_method == "Check" else "CAV"
+            suggested_cv = generate_voucher_number(c, "cv_number", prefix)
+            
+            # Added dynamic key so Streamlit updates the field when prefix or sequence changes
+            cv_input = col3.text_input(
+                "Voucher Number Sequence", 
+                value=suggested_cv, 
+                key=f"cv_input_{prefix}_{suggested_cv}"
+            )
             
             col1, col2, col3 = st.columns(3)
             
