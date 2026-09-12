@@ -6,6 +6,45 @@ import os
 from datetime import datetime
 from io import BytesIO
 
+def generate_voucher_number(c, column_name, prefix):
+    """
+    Robustly finds the highest sequence number for a given prefix (e.g., APV, CV, CAV)
+    across all relevant tables and columns, ensuring correct sequencing.
+    """
+    max_num = 0
+    
+    queries = [
+        f"SELECT {column_name} FROM deliveries WHERE {column_name} LIKE '{prefix}-%'",
+        f"SELECT voucher_no FROM journal_entries WHERE voucher_no LIKE '{prefix}-%'"
+    ]
+    
+    for q in queries:
+        try:
+            c.execute(q)
+            rows = c.fetchall()
+            for row in rows:
+                if row and row[0]:
+                    val = str(row[0]).strip()
+                    parts = val.split('-')
+                    if len(parts) > 1:
+                        try:
+                            num = int(parts[-1])
+                            if num > max_num:
+                                max_num = num
+                        except ValueError:
+                            import re
+                            numbers = re.findall(r'\d+', val)
+                            if numbers:
+                                num = int(numbers[-1])
+                                if num > max_num:
+                                    max_num = num
+        except Exception:
+            continue
+            
+    next_num = max_num + 1
+    return f"{prefix}-{next_num:05d}"
+    
+
 def get_income_statement(conn, start_date, end_date):
     # Convert date objects to text strings for Turso parameter binding
     start_str = str(start_date)
@@ -82,41 +121,7 @@ try:
 except ImportError:
     HAS_REPORTLAB = False
 
-def generate_voucher_number(c, column_name, prefix):
-    """
-    Safely finds the highest sequence number for a given prefix (e.g., APV, CV, CAV)
-    from both deliveries and journal_entries tables and increments it by 1.
-    """
-    max_num = 0
-    try:
-        c.execute(f"SELECT DISTINCT {column_name} FROM deliveries WHERE {column_name} LIKE '{prefix}-%'")
-        for row in c.fetchall():
-            if row[0]:
-                parts = row[0].split('-')
-                if len(parts) > 1:
-                    try:
-                        num = int(parts[-1])
-                        if num > max_num:
-                            max_num = num
-                    except ValueError:
-                        continue
-                        
-        c.execute(f"SELECT DISTINCT voucher_no FROM journal_entries WHERE voucher_no LIKE '{prefix}-%'")
-        for row in c.fetchall():
-            if row[0]:
-                parts = row[0].split('-')
-                if len(parts) > 1:
-                    try:
-                        num = int(parts[-1])
-                        if num > max_num:
-                            max_num = num
-                    except ValueError:
-                        continue
-    except Exception:
-        pass
-        
-    next_num = max_num + 1
-    return f"{prefix}-{next_num:05d}"
+
 
 # --- DATABASE SETUP (Turso / SQLite Integrated) ---
 @st.cache_resource
