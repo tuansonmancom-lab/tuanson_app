@@ -2468,15 +2468,3 @@ elif role == "Admin View All":
             file_name=f"accounts_payable_report_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
-if st.button("⚠️ Reset All Transaction & Inventory Data"):
-    try:
-        c.execute("DELETE FROM journal_entries")
-        c.execute("DELETE FROM deliveries")
-        c.execute("DELETE FROM inventory_ledger")
-        c.execute("DELETE FROM requests")
-        c.execute("DELETE FROM sqlite_sequence WHERE name IN ('journal_entries', 'deliveries', 'inventory_ledger', 'requests')")
-        conn.commit()
-        st.success("Database, inventory ledger, and vouchers successfully cleared! Sequence will now start fresh from 1.")
-        st.rerun()
-    except Exception as e:
-        st.error(f"Error resetting database: {e}")
