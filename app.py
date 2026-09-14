@@ -1296,14 +1296,13 @@ elif role == "Purchaser":
                 
                 st.write("Update the unit price(s) below:")
 
-                
-                
                 # st.data_editor lets the Purchaser edit the table directly on the screen
                 edited_df = st.data_editor(
                     po_items_df, 
                     disabled=["rowid", "item_no", "description", "qty", "unit", "amount"], # Lock everything except 'price'
                     hide_index=True,
                     use_container_width=True,
+                    column_config={"rowid": None}, # Hides the ID column from the user interface
                     key=f"edit_price_{pono}"
                 )
                 
