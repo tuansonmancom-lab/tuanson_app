@@ -1266,7 +1266,64 @@ elif role == "Purchaser":
                         conn.commit()
                         st.success(f"Successfully created P.O. #{po_number} with {len(selected_items)} item(s)!")
                         st.rerun()
+                        
 
+    st.subheader("⚠️ Rejected Purchase Orders (Action Required)")
+
+    # Fetch rejected POs and include the new rejection_reason column
+    rejected_pos = c.execute("""
+        SELECT pono, supplier, project_name, rejection_reason
+        FROM requests 
+        WHERE status = 'Rejected' AND pono IS NOT NULL AND pono != ''
+        GROUP BY pono
+    """).fetchall()
+
+    if not rejected_pos:
+        st.info("No rejected Purchase Orders at this time.")
+    else:
+        for po in rejected_pos:
+            pono, supplier, proj, reason = po
+            
+            with st.expander(f"❌ PO #{pono} | {supplier} | Needs Revision", expanded=True):
+                # Display the reason you typed in earlier!
+                st.error(f"**Rejection Reason:** {reason}") 
+                
+                # Fetch items. We include 'rowid' so we can update specific rows safely.
+                po_items_df = pd.read_sql_query(
+                    "SELECT rowid, item_no, description, qty, unit, price, amount FROM requests WHERE pono = ? AND status = 'Rejected'", 
+                    conn, params=(pono,)
+                )
+                
+                st.write("Update the unit price(s) below:")
+                
+                # st.data_editor lets the Purchaser edit the table directly on the screen
+                edited_df = st.data_editor(
+                    po_items_df, 
+                    disabled=["rowid", "item_no", "description", "qty", "unit", "amount"], # Lock everything except 'price'
+                    hide_index=True,
+                    use_container_width=True,
+                    key=f"edit_price_{pono}"
+                )
+                
+                if st.button("💾 Save Prices & Resubmit PO", key=f"resubmit_{pono}", type="primary"):
+                    # Loop through the edited dataframe and update the database
+                    for index, row in edited_df.iterrows():
+                        new_price = float(row['price'])
+                        new_amount = float(row['qty']) * new_price # Automatically recalculate the total amount
+                        row_id = row['rowid']
+                        
+                        c.execute("""
+                            UPDATE requests
+                            SET price = ?, amount = ?, status = 'Pending Approval', rejection_reason = NULL
+                            WHERE rowid = ?
+                        """, (new_price, new_amount, row_id))
+                    
+                    conn.commit()
+                    st.success(f"PO #{pono} resubmitted successfully!")
+                    import time
+                    time.sleep(1)
+                    st.rerun()
+    
     with tab_receive:
         st.write("### 🚚 Record Supplier Deliveries")
         st.info("Log items that have arrived on-site and upload attached Delivery Receipts (DR), Sales Invoices (SI), or Official Receipts (OR).")
