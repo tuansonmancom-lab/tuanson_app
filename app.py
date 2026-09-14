@@ -1359,19 +1359,27 @@ elif role == "Purchaser":
             st.write("#### ✅ Confirm Delivery Receipt")
             
             recv_col1, recv_col2 = st.columns(2)
-            po_to_receive = recv_col1.selectbox("Select PO Number", pending_recv_df['PO Number'].tolist())
-            dr_number = recv_col2.text_input("DR / SI / OR Document Number")
+            po_to_receive = recv_col1.selectbox("Select PO Number", pending_recv_df['PO Number'].tolist(), key="select_po_to_receive")
+            
+            # Document prefix selector and number input side-by-side
+            sub_col1, sub_col2 = recv_col2.columns([1, 2])
+            doc_prefix = sub_col1.selectbox("Type", ["DR", "CSI", "SI", "OR"], key="doc_type_prefix")
+            raw_doc_no = sub_col2.text_input("Document No.", placeholder="e.g. 00001", key="doc_num_raw")
+            
+            # Automatically combine them (e.g., "DR#00001")
+            dr_number = f"{doc_prefix}#{raw_doc_no}" if raw_doc_no else ""
             
             uploaded_file = st.file_uploader(
                 "📎 Attach File for DR / SI / OR (Photo or PDF)", 
-                type=["png", "jpg", "jpeg", "pdf"]
+                type=["png", "jpg", "jpeg", "pdf"],
+                key="receipt_file_uploader"
             )
             
             if uploaded_file is not None and uploaded_file.type.startswith("image/"):
                 st.image(uploaded_file, caption="Preview of attached document", width=250)
             
-            if st.button("Confirm Receiving", type="primary"):
-                if dr_number.strip():
+            if st.button("Confirm Receiving", type="primary", key="btn_confirm_receiving"):
+                if raw_doc_no.strip():
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     po_details = pending_recv_df[pending_recv_df['PO Number'] == po_to_receive].iloc[0]
                     
@@ -1395,13 +1403,13 @@ elif role == "Purchaser":
                         c.execute("""
                             INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks, status)
                             VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, 'Completed')
-                        """, (current_time, dr_number.strip(), item_desc, qty_val, new_bal, po_details['Project'], f"Received via DR #{dr_number.strip()} (PO #{po_to_receive})"))
+                        """, (current_time, dr_number.strip(), item_desc, qty_val, new_bal, po_details['Project'], f"Received via {dr_number.strip()} (PO #{po_to_receive})"))
 
                     conn.commit()
                     st.session_state["receive_success_msg"] = f"✅ PO #{po_to_receive} received under Doc #{dr_number}! Added to Inventory Ledger and forwarded to Accounting."
                     st.rerun()
                 else:
-                    st.warning("⚠️ Please input the DR / SI / OR document number.")
+                    st.warning("⚠️ Please input the document number.")
         else:
             st.success("🎉 No pending deliveries! All approved POs have been physically received.")
 
@@ -1431,11 +1439,11 @@ elif role == "Purchaser":
 
             st.write("#### 🔍 Select Item to View Attachment")
             options = {
-                f"PO #{row['PO Number']} | DR #{row['DR / SI / OR No.']} | {row['Supplier']} ({row['Project']})": row['id']
+                f"PO #{row['PO Number']} | {row['DR / SI / OR No.']} | {row['Supplier']} ({row['Project']})": row['id']
                 for _, row in history_df.iterrows()
             }
             
-            selected_label = st.selectbox("Choose a delivery record:", list(options.keys()))
+            selected_label = st.selectbox("Choose a delivery record:", list(options.keys()), key="select_history_record")
             selected_id = options[selected_label]
 
             selected_record = c.execute("SELECT receipt_image, file_name FROM deliveries WHERE id = ?", (selected_id,)).fetchone()
@@ -1446,12 +1454,12 @@ elif role == "Purchaser":
                     st.image(image_blob, caption=f"📷 Attached Receipt: {fname}", width=450)
                 elif fname and fname.lower().endswith('.pdf'):
                     st.info(f"📄 PDF Document attached: **{fname}**")
-                    st.download_button(label="📥 Download PDF Document", data=image_blob, file_name=fname, mime="application/pdf")
+                    st.download_button(label="📥 Download PDF Document", data=image_blob, file_name=fname, mime="application/pdf", key=f"dl_pdf_{selected_id}")
                 else:
                     try:
                         st.image(image_blob, caption=f"📷 Attached Receipt: {fname or 'Image'}", width=450)
                     except Exception:
-                        st.download_button(label=f"📥 Download Attached File ({fname or 'file'})", data=image_blob, file_name=fname or "receipt_file")
+                        st.download_button(label=f"📥 Download Attached File ({fname or 'file'})", data=image_blob, file_name=fname or "receipt_file", key=f"dl_file_{selected_id}")
             else:
                 st.warning("⚠️ No image or document file was attached for this receiving record.")
         else:
