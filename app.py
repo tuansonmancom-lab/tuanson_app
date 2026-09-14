@@ -1554,15 +1554,28 @@ elif role == "Approver":
                     st.success(f"PO #{pono} has been approved successfully!")
                     st.rerun()
                 
-                if col_rej.button("❌ Reject PO", key=f"rej_{pono}"):
-                    c.execute("""
-                        UPDATE requests 
-                        SET status = 'Rejected'
-                        WHERE pono = ? AND status = 'Pending Approval'
-                    """, (pono,))
-                    conn.commit()
-                    st.warning(f"PO #{pono} was rejected.")
-                    st.rerun()
+                # --- NEW TWO-STEP REJECTION LOGIC ---
+                with col_rej.popover("❌ Reject PO"):
+                    st.markdown(f"**Are you sure you want to reject PO #{pono}?**")
+                    reject_reason = st.text_area("Reason for rejection (Required):", key=f"reason_{pono}")
+                    
+                    if st.button("🚨 Confirm Rejection", key=f"confirm_rej_{pono}"):
+                        if not reject_reason.strip():
+                            st.error("Please provide a reason to reject this PO.")
+                        else:
+                            # Note: If your requests table has a 'remarks' column, 
+                            # you can easily update it here by adding it to the SET clause.
+                            c.execute("""
+                                UPDATE requests 
+                                SET status = 'Rejected'
+                                WHERE pono = ? AND status = 'Pending Approval'
+                            """, (pono,))
+                            conn.commit()
+                            
+                            st.success(f"PO #{pono} was rejected.")
+                            import time
+                            time.sleep(1) # Pauses for 1 second so the user sees the success message before reload
+                            st.rerun()
 
     st.markdown("---")
     st.subheader("🖨️ Approved Purchase Orders (Ready for Printing)")
