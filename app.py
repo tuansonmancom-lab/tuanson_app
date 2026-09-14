@@ -1563,18 +1563,17 @@ elif role == "Approver":
                         if not reject_reason.strip():
                             st.error("Please provide a reason to reject this PO.")
                         else:
-                            # Note: If your requests table has a 'remarks' column, 
-                            # you can easily update it here by adding it to the SET clause.
+                            # UPDATED: Now saving the reject_reason to your new database column
                             c.execute("""
                                 UPDATE requests 
-                                SET status = 'Rejected'
+                                SET status = 'Rejected', rejection_reason = ?
                                 WHERE pono = ? AND status = 'Pending Approval'
-                            """, (pono,))
+                            """, (reject_reason, pono))
                             conn.commit()
                             
                             st.success(f"PO #{pono} was rejected.")
                             import time
-                            time.sleep(1) # Pauses for 1 second so the user sees the success message before reload
+                            time.sleep(1) 
                             st.rerun()
 
     st.markdown("---")
