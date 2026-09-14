@@ -2239,7 +2239,7 @@ elif role == "Accounting":
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
 
-                # Generate the PDF buffer
+     # Generate the PDF buffer
             pdf_data = create_payment_voucher_pdf(
                 cv_no=cv_no,
                 cv_date=cv_date,
@@ -2260,7 +2260,7 @@ elif role == "Accounting":
                 file_name=f"Payment_Voucher_{cv_no}.pdf",
                 mime="application/pdf"
             )
-
+           
 
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
