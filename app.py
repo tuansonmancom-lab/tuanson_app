@@ -1310,8 +1310,8 @@ elif role == "Purchaser":
                     # Loop through the edited dataframe and update the database
                     for index, row in edited_df.iterrows():
                         new_price = float(row['price'])
-                        new_amount = float(row['qty']) * new_price # Automatically recalculate the total amount
-                        row_id = row['rowid']
+                        new_amount = float(row['qty']) * new_price 
+                        row_id = row['id'] # <-- Changed from 'rowid' to 'id'
                         
                         c.execute("""
                             UPDATE requests
