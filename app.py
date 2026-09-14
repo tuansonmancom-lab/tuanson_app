@@ -862,7 +862,10 @@ def create_payment_voucher_pdf(cv_no, cv_date, cheque_no, cheque_date, supplier,
 
     # 2. Vendor & Voucher Meta Data Table
     net_total = amount - ewt_amount
-    meta_data = [[Paragraph(supplier, body_style), Paragraph("NO.:", body_style), Paragraph(cv_no, body_style)]]
+    meta_data = [[Paragraph(supplier, bold_body), Paragraph("NO.:", bold_body), Paragraph(cv_no, body_style)]]
+    
+    # FIX: Initialize meta_table before styling it
+    meta_table = Table(meta_data, colWidths=[350, 40, 150])
     meta_table.setStyle(TableStyle([
         ('BOX', (0,0), (-1,-1), 1, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -928,12 +931,40 @@ def create_payment_voucher_pdf(cv_no, cv_date, cheque_no, cheque_date, supplier,
     story.append(pay_table)
     story.append(Spacer(1, 15))
 
-    # 6. Totals & Notes Section
+    # 6. Totals & Notes Section (FIXED & COMPLETED)
     totals_data = [
         [
             Paragraph(f"**Notes:** Less (1%) EWT ₱{ewt_amount:,.2f}", body_style),
-            Paragraph("**SUB TOTAL**)
-                      ]]
+            Paragraph("**SUB TOTAL**", bold_body),
+            Paragraph(f"**₱{amount:,.2f}**", bold_body)
+        ],
+        [
+            Paragraph("", body_style),
+            Paragraph("**NET TOTAL**", bold_body),
+            Paragraph(f"**₱{net_total:,.2f}**", bold_body)
+        ]
+    ]
+    totals_table = Table(totals_data, colWidths=[340, 90, 70])
+    totals_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('LINEABOVE', (1,1), (-1,1), 0.5, colors.black),
+    ]))
+    story.append(totals_table)
+    story.append(Spacer(1, 40))
+
+    # 7. Signatures Section (ADDED)
+    sig_data = [
+        [Paragraph("Prepared By:", body_style), Paragraph("Checked By:", body_style), Paragraph("Approved By:", body_style), Paragraph("Received By:", body_style)],
+        [Spacer(1, 30), Spacer(1, 30), Spacer(1, 30), Spacer(1, 30)], 
+        [Paragraph("_________________", body_style), Paragraph("_________________", body_style), Paragraph("_________________", body_style), Paragraph("_________________", body_style)]
+    ]
+    sig_table = Table(sig_data, colWidths=[135, 135, 135, 135])
+    story.append(sig_table)
+
+    # FIX: Build the document and return the buffer
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
                       
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
