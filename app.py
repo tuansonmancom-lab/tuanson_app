@@ -862,33 +862,77 @@ def create_payment_voucher_pdf(cv_no, cv_date, cheque_no, cheque_date, supplier,
 
     # 2. Vendor & Voucher Meta Data Table
     net_total = amount - ewt_amount
-    meta_data = [
+    meta_data = [[Paragraph(supplier, body_style), Paragraph("NO.:", body_style), Paragraph(cv_no, body_style)]]
+    meta_table.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ]))
+    story.append(meta_table)
+    story.append(Spacer(1, 10))
+
+    # 3. Main A/C Code Table
+    ac_data = [
+        [Paragraph("A/C CODE", header_style), Paragraph("A/C NAME", header_style), Paragraph("DESCRIPTION", header_style), Paragraph("AMOUNT", header_style)],
         [
-            Paragraph(f"**{supplier}**
+            Paragraph("VEN-M0034", body_style),
+            Paragraph(f"{supplier}", body_style),
+            Paragraph(f"Payment for materials at {project_name}", body_style),
+            Paragraph(f"₱{amount:,.2f}", body_style)
+        ]
+    ]
+    ac_table = Table(ac_data, colWidths=[70, 130, 260, 80])
+    ac_table.setStyle(TableStyle([
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
+        ('LINEBELOW', (0,1), (-1,1), 0.5, colors.lightgrey),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ]))
+    story.append(ac_table)
+    story.append(Spacer(1, 10))
 
-            {supplier_address}", body_style),
-Paragraph(f"NO.:
+    # 4. Journals Section
+    story.append(Paragraph("**Journals:**", bold_body))
+    story.append(Paragraph("******************************", body_style))
+    
+    journal_data = [
+        [Paragraph("Doc No.", header_style), Paragraph("Date", header_style), Paragraph("Account #", header_style), Paragraph("Account Name", header_style), Paragraph("Debit", header_style), Paragraph("Credit", header_style)],
+        [Paragraph(cv_no, body_style), Paragraph(cv_date, body_style), Paragraph("VEN-M0034", body_style), Paragraph(f"VEN-M0034: {supplier}", body_style), Paragraph(f"₱{amount:,.2f}", body_style), Paragraph("-", body_style)],
+        [Paragraph(cv_no, body_style), Paragraph(cv_date, body_style), Paragraph("100-0004", body_style), Paragraph("100-0004: CIB-BDO1", body_style), Paragraph("-", body_style), Paragraph(f"₱{amount:,.2f}", body_style)],
+        [Paragraph("", body_style), Paragraph("", body_style), Paragraph("", body_style), Paragraph("", body_style), Paragraph(f"**₱{amount:,.2f}**", body_style), Paragraph(f"**₱{amount:,.2f}**", body_style)],
+    ]
+    journal_table = Table(journal_data, colWidths=[65, 65, 75, 175, 60, 60])
+    journal_table.setStyle(TableStyle([
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
+        ('LINEBELOW', (0,-1), (-1,-1), 1, colors.black),
+        ('LINEABOVE', (0,-1), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(journal_table)
+    story.append(Spacer(1, 10))
 
+    # 5. Payment Details Section
+    story.append(Paragraph("**PAYMENT DETAILS**", bold_body))
+    pay_details_data = [
+        [Paragraph("Type", header_style), Paragraph("Doc. No.", header_style), Paragraph("Doc. Date", header_style), Paragraph("Description", header_style), Paragraph("Orig. Amount", header_style), Paragraph("Paid Amount", header_style)],
+        [Paragraph("BIL", body_style), Paragraph(f"PO#{pono}", body_style), Paragraph(cv_date, body_style), Paragraph(f"PAYABLE FOR PURCHASE OF MATERIALS FOR {project_name.upper()}", body_style), Paragraph(f"{amount:,.2f}", body_style), Paragraph(f"{amount:,.2f}", body_style)],
+    ]
+    pay_table = Table(pay_details_data, colWidths=[40, 70, 65, 185, 70, 70])
+    pay_table.setStyle(TableStyle([
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
+        ('LINEBELOW', (0,-1), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(pay_table)
+    story.append(Spacer(1, 15))
 
-DATE:
-
-
-CHEQUE NO.:", body_style),
-Paragraph(f"{cv_no}
-
-
-{cv_date}
-
-
-{cheque_no} /
-
-
-{cheque_date}", body_style)
-]
-]
-meta_table = Table(meta_data, colWidths=[260, 100, 180])
-
-
+    # 6. Totals & Notes Section
+    totals_data = [
+        [
+            Paragraph(f"**Notes:** Less (1%) EWT ₱{ewt_amount:,.2f}", body_style),
+            Paragraph("**SUB TOTAL**
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
 
