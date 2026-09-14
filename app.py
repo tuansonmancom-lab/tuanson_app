@@ -1921,8 +1921,8 @@ elif role == "Accounting":
                         if desc_parts:
                             po_desc_string = " - " + " | ".join(desc_parts)
                     
-                    debit_desc = f"APV setup for DR #{dr_to_apv} ({supplier_name}){po_desc_string}"
-                    credit_desc = f"APV liability accrued for DR #{dr_to_apv}{po_desc_string}"
+                    debit_desc = f"APV setup for {dr_to_apv} ({supplier_name}){po_desc_string}"
+                    credit_desc = f"APV liability accrued for {dr_to_apv}{po_desc_string}"
                     
                     c.execute("""
                         UPDATE deliveries 
