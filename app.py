@@ -864,8 +864,10 @@ def create_payment_voucher_pdf(cv_no, cv_date, cheque_no, cheque_date, supplier,
     net_total = amount - ewt_amount
     meta_data = [
         [
-            Paragraph(f"**{{supplier_address}", body_style),
-Paragraph("NO.:
+            Paragraph(f"**{supplier}**
+
+            {supplier_address}", body_style),
+Paragraph(f"NO.:
 
 
 DATE:
@@ -883,7 +885,9 @@ Paragraph(f"{cv_no}
 
 {cheque_date}", body_style)
 ]
-]}**
+]
+meta_table = Table(meta_data, colWidths=[260, 100, 180])
+
 
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
