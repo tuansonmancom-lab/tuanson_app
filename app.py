@@ -2239,27 +2239,27 @@ elif role == "Accounting":
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
 
-    # Generate the PDF buffer
-pdf_data = create_payment_voucher_pdf(
-    cv_no=cv_no,
-    cv_date=cv_date,
-    cheque_no=cheque_no,
-    cheque_date=cheque_date,
-    supplier=supplier,
-    supplier_address=supplier_address,
-    project_name=project_name,
-    pono=pono,
-    amount=amount,
-    ewt_amount=ewt_amount
-)
-
-# Render the Download Button in Streamlit
-st.download_button(
-    label="📄 Download Payment Voucher (PDF)",
-    data=pdf_data,
-    file_name=f"Payment_Voucher_{cv_no}.pdf",
-    mime="application/pdf"
-)
+                # Generate the PDF buffer
+            pdf_data = create_payment_voucher_pdf(
+                cv_no=cv_no,
+                cv_date=cv_date,
+                cheque_no=cheque_no,
+                cheque_date=cheque_date,
+                supplier=supplier,
+                supplier_address=supplier_address,
+                project_name=project_name,
+                pono=pono,
+                amount=amount,
+                ewt_amount=ewt_amount
+            )
+            
+            # Render the Download Button in Streamlit
+            st.download_button(
+                label="📄 Download Payment Voucher (PDF)",
+                data=pdf_data,
+                file_name=f"Payment_Voucher_{cv_no}.pdf",
+                mime="application/pdf"
+            )
 
 
     # --- TAB 3: GENERAL LEDGER ---
