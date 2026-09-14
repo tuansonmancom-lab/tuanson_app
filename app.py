@@ -932,7 +932,9 @@ def create_payment_voucher_pdf(cv_no, cv_date, cheque_no, cheque_date, supplier,
     totals_data = [
         [
             Paragraph(f"**Notes:** Less (1%) EWT ₱{ewt_amount:,.2f}", body_style),
-            Paragraph("**SUB TOTAL**
+            Paragraph("**SUB TOTAL**)
+                      ]]
+                      
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
 
