@@ -864,7 +864,26 @@ def create_payment_voucher_pdf(cv_no, cv_date, cheque_no, cheque_date, supplier,
     net_total = amount - ewt_amount
     meta_data = [
         [
-            Paragraph(f"**{supplier}**
+            Paragraph(f"**{{supplier_address}", body_style),
+Paragraph("NO.:
+
+
+DATE:
+
+
+CHEQUE NO.:", body_style),
+Paragraph(f"{cv_no}
+
+
+{cv_date}
+
+
+{cheque_no} /
+
+
+{cheque_date}", body_style)
+]
+]}**
 
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
