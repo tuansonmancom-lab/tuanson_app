@@ -832,6 +832,40 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, payment_method, total_amount
     buffer.seek(0)
     return buffer.getvalue()
 
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import io
+
+def create_payment_voucher_pdf(cv_no, cv_date, cheque_no, cheque_date, supplier, supplier_address, project_name, pono, amount, ewt_amount):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    story = []
+    styles = getSampleStyleSheet()
+
+    # Custom styles
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=14, leading=16, alignment=1, textColor=colors.HexColor('#8B0000'))
+    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8, leading=10, alignment=1)
+    header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=11)
+    body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8, leading=10)
+    bold_body = ParagraphStyle('BoldBodyStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, leading=10)
+
+    # 1. Company Header
+    story.append(Paragraph("Tuanson Construction", title_style))
+    story.append(Paragraph("GST Reg. No.: ___ | Sales Tax Reg. No.: ___ | Service Tax Reg. No.: ___", subtitle_style))
+    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", subtitle_style))
+    story.append(Paragraph("Tel : - Fax : ___ | URL : ___ | Email : ___", subtitle_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("**Payment Voucher**", ParagraphStyle('PVTitle', parent=title_style, fontSize=12, textColor=colors.black)))
+    story.append(Spacer(1, 10))
+
+    # 2. Vendor & Voucher Meta Data Table
+    net_total = amount - ewt_amount
+    meta_data = [
+        [
+            Paragraph(f"**{supplier}**
+
 # --- APP LAYOUT & LOGIN SYSTEM ---
 st.set_page_config(page_title="Tuanson Construction System", layout="wide")
 
