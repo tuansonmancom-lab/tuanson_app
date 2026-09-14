@@ -1302,7 +1302,7 @@ elif role == "Purchaser":
                     disabled=["rowid", "item_no", "description", "qty", "unit", "amount"], # Lock everything except 'price'
                     hide_index=True,
                     use_container_width=True,
-                    column_config={"rowid": None}, # Hides the ID column from the user interface
+                    column_config={"id": None}, # Hides the ID column from the user interface
                     key=f"edit_price_{pono}"
                 )
                 
