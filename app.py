@@ -981,28 +981,43 @@ if "logged_in" not in st.session_state:
     st.session_state.can_add_item = "No"
 
 if not st.session_state.logged_in:
-    st.title("🔒 Tuanson Construction - Login")
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submit_btn = st.form_submit_button("Login")
+    st.title("🏗️ Tuanson Construction Enterprise System")
+    st.caption("Integrated Procurement, Inventory & Double-Entry Accounting System")
+    st.write("---")
 
-        if submit_btn:
-            user_data = c.execute("SELECT id, username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users WHERE username=? AND password=? AND status='Active'", (username, password)).fetchone()
-            if user_data:
-                st.session_state.logged_in = True
-                st.session_state.current_user = user_data[1] 
+    col_login, col_flow = st.columns([1, 1.2], gap="large")
+
+    with col_login:
+        st.subheader("🔒 User Login")
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submit_btn = st.form_submit_button("Login", use_container_width=True)
+
+            if submit_btn:
+                user_data = c.execute(
+                    "SELECT id, username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users WHERE username=? AND password=? AND status='Active'",
+                    (username, password)
+                ).fetchone()
                 
-                raw_roles = user_data[3:9]
-                roles = [r for r in raw_roles if r and str(r).strip() != ""]
-                st.session_state.available_roles = roles
-                
-                st.session_state.can_add_act = user_data[10]
-                st.session_state.can_add_item = user_data[11]
-                st.rerun()
-            else:
-                st.error("Invalid Username/Password or Account is Inactive.")
-    st.stop()
+                if user_data:
+                    st.session_state.logged_in = True
+                    st.session_state.current_user = user_data[1] 
+                    
+                    raw_roles = user_data[3:9]
+                    roles = [r for r in raw_roles if r and str(r).strip() != ""]
+                    st.session_state.available_roles = roles
+                    
+                    st.session_state.can_add_act = user_data[10]
+                    st.session_state.can_add_item = user_data[11]
+                    st.rerun()
+                else:
+                    st.error("Invalid Username/Password or Account is Inactive.")
+
+    with col_flow:
+        st.subheader("🔄 System Workflow Process")
+        st.markdown(
+            """
     
 # --- IF LOGGED IN: SHOW MAIN APP ---
 
