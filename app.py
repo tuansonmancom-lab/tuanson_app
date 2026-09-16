@@ -1973,6 +1973,8 @@ elif role == "Office Manager":
 
 # --- ROLE 5: ACCOUNTING ---
 elif role == "Accounting":
+    from datetime import datetime, timedelta
+
     st.subheader("🧾 Accounting Dashboard - Payables & Financial Reports")
     
     if st.button("🔄 Refresh Accounting Data", key="btn_refresh_accounting"):
@@ -2156,26 +2158,85 @@ elif role == "Accounting":
 
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
-        st.write("### 💳 Outstanding Payables with Approved APV")
-        st.info("Process payments for vouchered liabilities via Cash or Check.")
+        st.write("### 💳 Outstanding Payables with AP Aging Summary")
         
+        # --- AP AGING DATA PREPARATION ---
         pay_df = pd.read_sql_query("""
             SELECT id, apv_number AS 'APV Number', pono AS 'PO Number', dr_number AS 'DR Number', 
-                   supplier AS 'Supplier', total_amount AS 'Total Amount', apv_date AS 'APV Date'
+                   supplier AS 'Supplier', total_amount AS 'Total Amount', apv_date AS 'APV Date',
+                   project_name AS 'Project'
             FROM deliveries 
             WHERE payment_status = 'Unpaid' AND apv_number IS NOT NULL AND apv_number != ''
             ORDER BY apv_date ASC
         """, conn)
-        
-        if not pay_df.empty:
-            st.dataframe(pay_df.style.format({"Total Amount": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
+
+        # Attempt to load supplier credit terms if table exists, otherwise default Net 30
+        try:
+            terms_lookup = dict(c.execute("SELECT supplier_name, terms_days FROM suppliers").fetchall())
+        except Exception:
+            terms_lookup = {}
+
+        today = datetime.now().date()
+
+        def compute_aging(row):
+            sup = row['Supplier']
+            terms = terms_lookup.get(sup, 30)
+            try:
+                apv_dt = pd.to_datetime(row['APV Date']).date()
+            except Exception:
+                apv_dt = today
             
+            due_dt = apv_dt + timedelta(days=terms)
+            days_overdue = (today - due_dt).days
+            
+            if days_overdue <= 0:
+                status = f"🟢 Current ({abs(days_overdue)}d left)"
+                bucket = "Current"
+            elif 1 <= days_overdue <= 15:
+                status = f"🟡 Overdue ({days_overdue}d)"
+                bucket = "1-15 Days"
+            elif 16 <= days_overdue <= 30:
+                status = f"🟠 Overdue ({days_overdue}d)"
+                bucket = "16-30 Days"
+            else:
+                status = f"🔴 Overdue ({days_overdue}d)"
+                bucket = "30+ Days"
+                
+            return pd.Series([due_dt.strftime('%Y-%m-%d'), days_overdue, status, bucket])
+
+        if not pay_df.empty:
+            pay_df[['Due Date', 'Days Overdue', 'Aging Status', 'Aging Bucket']] = pay_df.apply(compute_aging, axis=1)
+
+            # Display AP Aging Metrics Header
+            m_curr = pay_df[pay_df['Aging Bucket'] == 'Current']['Total Amount'].sum()
+            m_1_15 = pay_df[pay_df['Aging Bucket'] == '1-15 Days']['Total Amount'].sum()
+            m_16_30 = pay_df[pay_df['Aging Bucket'] == '16-30 Days']['Total Amount'].sum()
+            m_30_plus = pay_df[pay_df['Aging Bucket'] == '30+ Days']['Total Amount'].sum()
+
+            ac1, ac2, ac3, ac4 = st.columns(4)
+            ac1.metric("🟢 Current (Not Due)", f"₱{m_curr:,.2f}")
+            ac2.metric("🟡 1-15 Days Overdue", f"₱{m_1_15:,.2f}")
+            ac3.metric("🟠 16-30 Days Overdue", f"₱{m_16_30:,.2f}")
+            ac4.metric("🔴 30+ Days Overdue", f"₱{m_30_plus:,.2f}")
+
+            st.markdown("---")
+            st.dataframe(
+                pay_df[['APV Number', 'PO Number', 'Supplier', 'Project', 'Total Amount', 'APV Date', 'Due Date', 'Aging Status']]
+                .style.format({"Total Amount": "₱{:,.2f}"}), 
+                use_container_width=True, 
+                hide_index=True
+            )
+
             st.markdown("---")
             st.write("#### 💸 Process Payment & Generate Check Voucher")
             
             col1, col2, col3 = st.columns(3)
             
-            apv_to_pay = col1.selectbox("Select APV Number to Pay", pay_df['APV Number'].tolist())
+            # Form dropdown with overdue badges
+            apv_options = pay_df.apply(lambda r: f"{r['APV Number']} - {r['Supplier']} (₱{r['Total Amount']:,.2f}) [{r['Aging Status']}]", axis=1).tolist()
+            selected_apv_str = col1.selectbox("Select APV Number to Pay", apv_options)
+            apv_to_pay = selected_apv_str.split(" - ")[0]
+            
             pay_method = col2.selectbox("Payment Method", ["Check", "Cash"])
             
             bank_accounts = [
@@ -2257,6 +2318,57 @@ elif role == "Accounting":
         else:
             st.success("🎉 No outstanding vouchered payables waiting for payment!")
 
+        # --- PETTY CASH LIQUIDATION EXPANDER ---
+        st.markdown("---")
+        with st.expander("🧾 Process Petty Cash Liquidation / Direct Expense Reimbursement"):
+            with st.form("petty_cash_form", clear_on_submit=True):
+                pc_col1, pc_col2, pc_col3 = st.columns(3)
+                payee_name = pc_col1.text_input("Payee / Custodian Name")
+                or_number = pc_col2.text_input("OR / Receipt Ref Number")
+                
+                # Fetch project list dynamically
+                projects_query = c.execute("SELECT DISTINCT project_name FROM deliveries WHERE project_name IS NOT NULL AND project_name != ''").fetchall()
+                project_options = [p[0] for p in projects_query] if projects_query else ["General Head Office"]
+                pc_project = pc_col3.selectbox("Project Site Tagging", project_options)
+                
+                pc_col4, pc_col5 = st.columns(2)
+                pc_amount = pc_col4.number_input("Liquidation Amount (₱)", min_value=0.0, step=100.0, format="%.2f")
+                
+                exp_accounts = c.execute("SELECT account_code, account_name FROM chart_of_accounts WHERE account_type = 'Expense'").fetchall()
+                exp_opts = [f"[{acc[0]}] {acc[1]}" for acc in exp_accounts] if exp_accounts else ["60200 - Direct Cost Materials"]
+                pc_expense_account = pc_col5.selectbox("Expense Category (Debit)", exp_opts)
+                
+                pc_desc = st.text_area("Particulars / Purpose of Expense", height=70)
+                
+                submit_pc = st.form_submit_button("⚡ Post Petty Cash Liquidation", type="primary")
+                if submit_pc:
+                    if payee_name.strip() and pc_amount > 0:
+                        pc_v_num = generate_voucher_number(c, "cv_number", "PCV")
+                        cur_dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        e_code = pc_expense_account.split("]")[0].replace("[", "")
+                        e_name = pc_expense_account.split("]")[1].strip()
+                        
+                        desc_full = f"Petty Cash: {pc_desc.strip()} (Payee: {payee_name}, OR: {or_number}, Site: {pc_project})"
+                        
+                        # Debit Expense
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
+                            VALUES (?, ?, ?, ?, ?, 0.0, ?, ?)
+                        """, (cur_dt, pc_v_num, e_code, e_name, pc_amount, or_number, desc_full))
+                        
+                        # Credit Cash on Hand / Petty Cash
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
+                            VALUES (?, ?, '10100', 'Cash on Hand', 0.0, ?, ?, ?)
+                        """, (cur_dt, pc_v_num, pc_amount, or_number, desc_full))
+                        
+                        conn.commit()
+                        st.success(f"🎉 Petty Cash Voucher {pc_v_num} posted successfully for ₱{pc_amount:,.2f}!")
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Payee Name and a valid Amount greater than 0 are required.")
+
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
         
@@ -2283,29 +2395,6 @@ elif role == "Accounting":
                 )
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
-
-     # Generate the PDF buffer
-            pdf_data = create_payment_voucher_pdf(
-                cv_no=cv_no,
-                cv_date=cv_date,
-                cheque_no=cheque_no,
-                cheque_date=cheque_date,
-                supplier=supplier,
-                supplier_address=supplier_address,
-                project_name=project_name,
-                pono=pono,
-                amount=amount,
-                ewt_amount=ewt_amount
-            )
-            
-            # Render the Download Button in Streamlit
-            st.download_button(
-                label="📄 Download Payment Voucher (PDF)",
-                data=pdf_data,
-                file_name=f"Payment_Voucher_{cv_no}.pdf",
-                mime="application/pdf"
-            )
-           
 
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
