@@ -1018,7 +1018,12 @@ if not st.session_state.logged_in:
         st.subheader("🔄 System Workflow Process")
         st.markdown(
             """
-    
+    """,
+        unsafe_allow_html=True
+    )
+
+st.stop()
+
 # --- IF LOGGED IN: SHOW MAIN APP ---
 
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
