@@ -2326,28 +2326,44 @@ elif role == "Accounting":
         # --- PETTY CASH LIQUIDATION EXPANDER ---
         st.markdown("---")
         with st.expander("🧾 Process Petty Cash Liquidation / Direct Expense Reimbursement"):
+            # Auto-increment PCV number directly from journal_entries
+            pcv_row = c.execute("SELECT MAX(voucher_no) FROM journal_entries WHERE voucher_no LIKE 'PCV-%'").fetchone()
+            if pcv_row and pcv_row[0]:
+                try:
+                    last_num = int(pcv_row[0].split('-')[-1])
+                    suggested_pcv = f"PCV-{(last_num + 1):05d}"
+                except ValueError:
+                    suggested_pcv = "PCV-00001"
+            else:
+                suggested_pcv = "PCV-00001"
+
             with st.form("petty_cash_form", clear_on_submit=True):
-                pc_col1, pc_col2, pc_col3 = st.columns(3)
-                payee_name = pc_col1.text_input("Payee / Custodian Name")
-                or_number = pc_col2.text_input("OR / Receipt Ref Number")
+                pc_col1, pc_col2, pc_col3, pc_col4 = st.columns(4)
+                
+                pc_v_num_input = pc_col1.text_input(
+                    "Voucher Number", 
+                    value=suggested_pcv, 
+                    key=f"pcv_num_{suggested_pcv}"
+                )
+                payee_name = pc_col2.text_input("Payee / Custodian Name")
+                or_number = pc_col3.text_input("OR / Receipt Ref Number")
                 
                 projects_query = c.execute("SELECT DISTINCT project_name FROM deliveries WHERE project_name IS NOT NULL AND project_name != ''").fetchall()
                 project_options = [p[0] for p in projects_query] if projects_query else ["General Head Office"]
-                pc_project = pc_col3.selectbox("Project Site Tagging", project_options)
+                pc_project = pc_col4.selectbox("Project Site Tagging", project_options)
                 
-                pc_col4, pc_col5 = st.columns(2)
-                pc_amount = pc_col4.number_input("Liquidation Amount (₱)", min_value=0.0, step=100.0, format="%.2f")
+                pc_col5, pc_col6 = st.columns(2)
+                pc_amount = pc_col5.number_input("Liquidation Amount (₱)", min_value=0.0, step=100.0, format="%.2f")
                 
                 exp_accounts = c.execute("SELECT account_code, account_name FROM chart_of_accounts WHERE account_type = 'Expense'").fetchall()
                 exp_opts = [f"[{acc[0]}] {acc[1]}" for acc in exp_accounts] if exp_accounts else ["60200 - Direct Cost Materials"]
-                pc_expense_account = pc_col5.selectbox("Expense Category (Debit)", exp_opts)
+                pc_expense_account = pc_col6.selectbox("Expense Category (Debit)", exp_opts)
                 
                 pc_desc = st.text_area("Particulars / Purpose of Expense", height=70)
                 
                 submit_pc = st.form_submit_button("⚡ Post Petty Cash Liquidation", type="primary")
                 if submit_pc:
-                    if payee_name.strip() and pc_amount > 0:
-                        pc_v_num = generate_voucher_number(c, "cv_number", "PCV")
+                    if payee_name.strip() and pc_amount > 0 and pc_v_num_input.strip():
                         cur_dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         
                         e_code = pc_expense_account.split("]")[0].replace("[", "")
@@ -2355,21 +2371,23 @@ elif role == "Accounting":
                         
                         desc_full = f"Petty Cash: {pc_desc.strip()} (Payee: {payee_name}, OR: {or_number}, Site: {pc_project})"
                         
+                        # Debit Expense
                         c.execute("""
                             INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                             VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
-                        """, (cur_dt, pc_v_num, e_code, e_name, pc_amount, or_number, desc_full, pc_project))
+                        """, (cur_dt, pc_v_num_input.strip(), e_code, e_name, pc_amount, or_number, desc_full, pc_project))
                         
+                        # Credit Cash on Hand
                         c.execute("""
                             INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                             VALUES (?, ?, '10100', 'Cash on Hand', 0.0, ?, ?, ?, ?)
-                        """, (cur_dt, pc_v_num, pc_amount, or_number, desc_full, pc_project))
+                        """, (cur_dt, pc_v_num_input.strip(), pc_amount, or_number, desc_full, pc_project))
                         
                         conn.commit()
-                        st.success(f"🎉 Petty Cash Voucher {pc_v_num} posted successfully for ₱{pc_amount:,.2f}!")
+                        st.success(f"🎉 Petty Cash Voucher {pc_v_num_input.strip()} posted successfully for ₱{pc_amount:,.2f}!")
                         st.rerun()
                     else:
-                        st.error("⚠️ Payee Name and a valid Amount greater than 0 are required.")
+                        st.error("⚠️ Payee Name, Voucher Number, and a valid Amount greater than 0 are required.")
 
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
