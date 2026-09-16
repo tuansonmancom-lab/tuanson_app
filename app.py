@@ -985,6 +985,7 @@ if not st.session_state.logged_in:
     st.caption("Integrated Procurement, Inventory & Double-Entry Accounting System")
     st.write("---")
 
+    # Split the screen into two columns
     col_login, col_flow = st.columns([1, 1.2], gap="large")
 
     with col_login:
@@ -995,11 +996,7 @@ if not st.session_state.logged_in:
             submit_btn = st.form_submit_button("Login", use_container_width=True)
 
             if submit_btn:
-                user_data = c.execute(
-                    "SELECT id, username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users WHERE username=? AND password=? AND status='Active'",
-                    (username, password)
-                ).fetchone()
-                
+                user_data = c.execute("SELECT id, username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users WHERE username=? AND password=? AND status='Active'", (username, password)).fetchone()
                 if user_data:
                     st.session_state.logged_in = True
                     st.session_state.current_user = user_data[1] 
@@ -1018,11 +1015,39 @@ if not st.session_state.logged_in:
         st.subheader("🔄 System Workflow Process")
         st.markdown(
             """
-    """,
-        unsafe_allow_html=True
-    )
+                📝 Requisitor
 
-    st.stop()    
+                Creates Purchase Requisition floaters for site material needs.
+                
+                ⬇️
+                
+                🛒 Purchaser
+                
+                Requests supplier quotes and generates Purchase Orders (PO).
+                
+                ⬇️
+                
+                👔 Approver / Manager
+                
+                Reviews budget alignment, approves POs, and authorizes releases.
+                
+                ⬇️
+                
+                🚚 Purchaser & Receiving
+                
+                Logs Delivery Receipts (DR) and updates inventory ledgers.
+                
+                ⬇️
+                
+                📑 Accounting
+                
+                Issues AP Vouchers (APV), 1% EWT deductions, and Payment Vouchers (CV).
+                
+                        """,
+                        unsafe_allow_html=True
+                    )
+                
+        st.stop() 
 
 # --- IF LOGGED IN: SHOW MAIN APP ---
 
