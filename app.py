@@ -1975,6 +1975,13 @@ elif role == "Office Manager":
 elif role == "Accounting":
     from datetime import datetime, timedelta
 
+    # Automatic schema migration check for project_name column
+    try:
+        c.execute("ALTER TABLE journal_entries ADD COLUMN project_name TEXT")
+        conn.commit()
+    except Exception:
+        pass
+
     st.subheader("🧾 Accounting Dashboard - Payables & Financial Reports")
     
     if st.button("🔄 Refresh Accounting Data", key="btn_refresh_accounting"):
@@ -2087,6 +2094,7 @@ elif role == "Accounting":
                     total_amt = float(selected_del['Total Amount'])
                     po_no = selected_del['PO Number']
                     supplier_name = selected_del['Supplier']
+                    proj_name = selected_del['Project']
                     
                     po_details = c.execute("SELECT activity, Description FROM requests WHERE pono = ?", (po_no,)).fetchall()
                     po_desc_string = ""
@@ -2112,14 +2120,14 @@ elif role == "Accounting":
                     """, (apv_input.strip(), current_time, dr_to_apv))
                     
                     c.execute("""
-                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
-                        VALUES (?, ?, ?, ?, ?, 0.0, ?, ?)
-                    """, (current_time, apv_input.strip(), selected_acc_code, selected_acc_name, total_amt, dr_to_apv, debit_desc))
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                        VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
+                    """, (current_time, apv_input.strip(), selected_acc_code, selected_acc_name, total_amt, dr_to_apv, debit_desc, proj_name))
                     
                     c.execute("""
-                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
-                        VALUES (?, ?, '20100', 'Accounts Payable-Trade', 0.0, ?, ?, ?)
-                    """, (current_time, apv_input.strip(), total_amt, dr_to_apv, credit_desc))
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                        VALUES (?, ?, '20100', 'Accounts Payable-Trade', 0.0, ?, ?, ?, ?)
+                    """, (current_time, apv_input.strip(), total_amt, dr_to_apv, credit_desc, proj_name))
                     
                     conn.commit()
                     st.success(f"🎉 Voucher {apv_input.strip()} recorded successfully for DR #{dr_to_apv}!")
@@ -2160,7 +2168,6 @@ elif role == "Accounting":
     with tab_payment:
         st.write("### 💳 Outstanding Payables with AP Aging Summary")
         
-        # --- AP AGING DATA PREPARATION ---
         pay_df = pd.read_sql_query("""
             SELECT id, apv_number AS 'APV Number', pono AS 'PO Number', dr_number AS 'DR Number', 
                    supplier AS 'Supplier', total_amount AS 'Total Amount', apv_date AS 'APV Date',
@@ -2170,7 +2177,6 @@ elif role == "Accounting":
             ORDER BY apv_date ASC
         """, conn)
 
-        # Attempt to load supplier credit terms if table exists, otherwise default Net 30
         try:
             terms_lookup = dict(c.execute("SELECT supplier_name, terms_days FROM suppliers").fetchall())
         except Exception:
@@ -2207,7 +2213,6 @@ elif role == "Accounting":
         if not pay_df.empty:
             pay_df[['Due Date', 'Days Overdue', 'Aging Status', 'Aging Bucket']] = pay_df.apply(compute_aging, axis=1)
 
-            # Display AP Aging Metrics Header
             m_curr = pay_df[pay_df['Aging Bucket'] == 'Current']['Total Amount'].sum()
             m_1_15 = pay_df[pay_df['Aging Bucket'] == '1-15 Days']['Total Amount'].sum()
             m_16_30 = pay_df[pay_df['Aging Bucket'] == '16-30 Days']['Total Amount'].sum()
@@ -2232,7 +2237,6 @@ elif role == "Accounting":
             
             col1, col2, col3 = st.columns(3)
             
-            # Form dropdown with overdue badges
             apv_options = pay_df.apply(lambda r: f"{r['APV Number']} - {r['Supplier']} (₱{r['Total Amount']:,.2f}) [{r['Aging Status']}]", axis=1).tolist()
             selected_apv_str = col1.selectbox("Select APV Number to Pay", apv_options)
             apv_to_pay = selected_apv_str.split(" - ")[0]
@@ -2274,6 +2278,7 @@ elif role == "Accounting":
                     pay_amt = float(selected_pay['Total Amount'])
                     po_no = selected_pay['PO Number']
                     supplier_name = selected_pay['Supplier']
+                    proj_name = selected_pay['Project']
                     
                     po_details = c.execute("SELECT activity, Description FROM requests WHERE pono = ?", (po_no,)).fetchall()
                     po_desc_string = ""
@@ -2301,14 +2306,14 @@ elif role == "Accounting":
                     c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (po_no,))
                     
                     c.execute("""
-                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
-                        VALUES (?, ?, '20100', 'Accounts Payable-Trade', ?, 0.0, ?, ?)
-                    """, (current_time, cv_input.strip(), pay_amt, apv_to_pay, cv_debit_desc))
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                        VALUES (?, ?, '20100', 'Accounts Payable-Trade', ?, 0.0, ?, ?, ?)
+                    """, (current_time, cv_input.strip(), pay_amt, apv_to_pay, cv_debit_desc, proj_name))
                     
                     c.execute("""
-                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
-                        VALUES (?, ?, ?, ?, 0.0, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, pay_amt, apv_to_pay, cv_credit_desc))
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                        VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
+                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, pay_amt, apv_to_pay, cv_credit_desc, proj_name))
                     
                     conn.commit()
                     st.success(f"🎉 Voucher {cv_input.strip()} completed! Payment cleared for APV #{apv_to_pay}.")
@@ -2326,7 +2331,6 @@ elif role == "Accounting":
                 payee_name = pc_col1.text_input("Payee / Custodian Name")
                 or_number = pc_col2.text_input("OR / Receipt Ref Number")
                 
-                # Fetch project list dynamically
                 projects_query = c.execute("SELECT DISTINCT project_name FROM deliveries WHERE project_name IS NOT NULL AND project_name != ''").fetchall()
                 project_options = [p[0] for p in projects_query] if projects_query else ["General Head Office"]
                 pc_project = pc_col3.selectbox("Project Site Tagging", project_options)
@@ -2351,17 +2355,15 @@ elif role == "Accounting":
                         
                         desc_full = f"Petty Cash: {pc_desc.strip()} (Payee: {payee_name}, OR: {or_number}, Site: {pc_project})"
                         
-                        # Debit Expense
                         c.execute("""
-                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
-                            VALUES (?, ?, ?, ?, ?, 0.0, ?, ?)
-                        """, (cur_dt, pc_v_num, e_code, e_name, pc_amount, or_number, desc_full))
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                            VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
+                        """, (cur_dt, pc_v_num, e_code, e_name, pc_amount, or_number, desc_full, pc_project))
                         
-                        # Credit Cash on Hand / Petty Cash
                         c.execute("""
-                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description)
-                            VALUES (?, ?, '10100', 'Cash on Hand', 0.0, ?, ?, ?)
-                        """, (cur_dt, pc_v_num, pc_amount, or_number, desc_full))
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                            VALUES (?, ?, '10100', 'Cash on Hand', 0.0, ?, ?, ?, ?)
+                        """, (cur_dt, pc_v_num, pc_amount, or_number, desc_full, pc_project))
                         
                         conn.commit()
                         st.success(f"🎉 Petty Cash Voucher {pc_v_num} posted successfully for ₱{pc_amount:,.2f}!")
@@ -2411,7 +2413,7 @@ elif role == "Accounting":
                 j.credit AS 'Credit', 
                 j.ref_no AS 'Ref Doc', 
                 j.description AS 'Description',
-                COALESCE(d.project_name, '') AS 'Project Name',
+                COALESCE(NULLIF(j.project_name, ''), d.project_name, '') AS 'Project Name',
                 COALESCE(d.supplier, '') AS 'Supplier'
             FROM journal_entries j
             LEFT JOIN deliveries d ON (j.ref_no = d.dr_number OR j.ref_no = d.apv_number OR j.ref_no = d.cv_number)
