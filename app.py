@@ -2392,6 +2392,7 @@ elif role == "Office Manager":
         mime="text/csv"
     )
 
+#==================================================================================
 # --- ROLE 5: ACCOUNTING ---
 elif role == "Accounting":
 
@@ -2448,7 +2449,7 @@ elif role == "Accounting":
                             conn.commit()
                             st.success(f"Account {new_acc_code.strip()} - {new_acc_name.strip()} added successfully!")
                             st.rerun()
-                        except Exception as e:
+                        except Exception:
                             st.error(f"⚠️ Account Code '{new_acc_code.strip()}' already exists or error occurred.")
                     else:
                         st.warning("⚠️ Please provide both an Account Code and Account Name.")
@@ -2585,7 +2586,7 @@ elif role == "Accounting":
                 
                 pdf_bytes = create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt, conn)
                 col_btn.download_button(
-                    label=f"🖨️ Print APV",
+                    label="🖨️ Print APV",
                     data=pdf_bytes,
                     file_name=f"APV_{apv_no}.pdf",
                     mime="application/pdf",
@@ -2595,11 +2596,9 @@ elif role == "Accounting":
             st.info("No generated APVs available for printing yet.")
 
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
-    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
         st.write("### 💳 Outstanding Payables & AP Aging Summary")
         
-        # 1. Fetch unpaid deliveries with APVs
         pay_df = pd.read_sql_query("""
             SELECT id, apv_number AS 'APV Number', pono AS 'PO Number', dr_number AS 'DR Number', 
                    supplier AS 'Supplier', total_amount AS 'Total Amount', apv_date AS 'APV Date',
@@ -2670,7 +2669,6 @@ elif role == "Accounting":
         st.markdown("---")
         st.write("#### 💸 Process Payment & Generate Voucher")
     
-        # Payment Basis Mode Switch
         pay_basis = st.radio("Payment Mode:", ["Standard Payment (APV Basis)", "Advance PDC / Downpayment (PO Basis)"], horizontal=True)
     
         selected_apv_no = ""
@@ -2762,12 +2760,10 @@ elif role == "Accounting":
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     c_date_str = cheque_date_input.strftime("%Y-%m-%d")
     
-                    # Build explicit description
                     ref_ident = f"APV #{selected_apv_no}" if selected_apv_no else f"PO #{selected_po_no}"
                     cv_debit_desc = f"Settlement of {ref_ident} ({supplier_name})"
                     cv_credit_desc = f"Payment release via {pay_method} for {ref_ident}"
     
-                    # 1. Update Deliveries / Requests table
                     if selected_apv_no:
                         c.execute("""
                             UPDATE deliveries 
@@ -2783,14 +2779,11 @@ elif role == "Accounting":
                             WHERE pono = ?
                         """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
     
-                    # 2. Post GL Entries
-                    # DEBIT ENTRY
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
                     """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, selected_apv_no or selected_po_no, cv_debit_desc, project_name))
     
-                    # CREDIT ENTRY
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
@@ -2802,7 +2795,6 @@ elif role == "Accounting":
                 else:
                     st.error("⚠️ Please enter a valid Voucher Number.")
     
-        # --- PETTY CASH LIQUIDATION EXPANDER ---
         st.markdown("---")
         with st.expander("🧾 Process Petty Cash Liquidation / Direct Expense Reimbursement"):
             pcv_row = c.execute("SELECT MAX(voucher_no) FROM journal_entries WHERE voucher_no LIKE 'PCV-%'").fetchone()
@@ -2845,13 +2837,11 @@ elif role == "Accounting":
                         
                         desc_full = f"Petty Cash: {pc_desc.strip()} (Payee: {payee_name}, OR: {or_number}, Site: {pc_project})"
                         
-                        # Debit Expense
                         c.execute("""
                             INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                             VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
                         """, (cur_dt, pc_v_num_input.strip(), e_code, e_name, pc_amount, or_number, desc_full, pc_project))
                         
-                        # Credit Cash on Hand
                         c.execute("""
                             INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                             VALUES (?, ?, '10100', 'Cash on Hand', 0.0, ?, ?, ?, ?)
@@ -2863,7 +2853,6 @@ elif role == "Accounting":
                     else:
                         st.error("⚠️ Payee Name, Voucher Number, and a valid Amount greater than 0 are required.")
     
-        # --- UPDATE CHEQUE DATE & NUMBER EXPANDER ---
         st.markdown("---")
         with st.expander("✏️ Update Cheque Date / Cheque Number for Issued Vouchers"):
             issued_cv_rows = c.execute("""
@@ -2909,7 +2898,6 @@ elif role == "Accounting":
             else:
                 st.info("No issued vouchers available to update.")
     
-        # --- ISSUED VOUCHERS LIST ---
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
         
@@ -2948,9 +2936,7 @@ elif role == "Accounting":
                 st.markdown("---")
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
-    #================================================================================
-    
-            
+
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
@@ -3117,7 +3103,7 @@ elif role == "Accounting":
                 st.success(f"Balance Check Passed: Total Assets (₱{tot_assets:,.2f}) = Liabilities + Equity (₱{tot_liab + tot_equity:,.2f})")
             else:
                 st.error(f"⚠️ Unbalanced! Assets: ₱{tot_assets:,.2f} | Liabilities + Equity: ₱{tot_liab + tot_equity:,.2f}")
-
+#==================================================================================
 # --- ROLE 6: ADMIN VIEW ALL ---
 elif role == "Admin View All":
     st.subheader("🛡️ Admin Dashboard & Analytics")
