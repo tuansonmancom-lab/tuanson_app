@@ -1087,13 +1087,13 @@ def format_cheque_date_exact(date_str):
         return str(date_str)
 
 
-# --- HELPER 2: CHEQUE AMOUNT IN WORDS ---
+# --- HELPER: CHEQUE AMOUNT IN WORDS (CLEAN: NO '***' AND NO 'ONLY') ---
 def cheque_amount_to_words(amount):
-    """Formats amount into cheque words without 'PHILIPPINE PESO' prefix."""
+    """Formats amount for cheque printing without '***' or 'ONLY'."""
     try:
         amount = float(amount)
     except (ValueError, TypeError):
-        return "ZERO PESOS ONLY"
+        return "ZERO PESOS"
     
     pesos = int(amount)
     cents = int(round((amount - pesos) * 100))
@@ -1129,54 +1129,50 @@ def cheque_amount_to_words(amount):
         words_str = " ".join(parts)
 
     if cents > 0:
-        return f"*** {words_str} & {cents:02d}/100 PESOS ONLY ***"
-    return f"*** {words_str} PESOS ONLY ***"
-#===========================================================================
-import io
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch, mm
-from reportlab.pdfgen import canvas
+        return f"{words_str} PESOS & {cents:02d}/100"
+    return f"{words_str} PESOS"
 
+
+# --- PDF GENERATOR: ALIGNED CHEQUE LAYOUT ---
 def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     
     font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
 
-    # --- GOOGLE SHEETS MARGINS: left=0.745", top=0.40" ---
+    # --- BASE MARGINS FROM GOOGLE SHEETS ---
     left_margin = 0.745 * inch   # ~18.92 mm
     top_margin  = 0.400 * inch   # ~10.16 mm
     
-    # A4 Page Height = 297mm. Top anchor Y-coordinate in ReportLab:
     top_y = (297 * mm) - top_margin  # ~286.84 mm
 
-    # --- COORDINATES MATCHING D4:J10 GRID ---
-    date_x     = left_margin + (125 * mm)   # Column for Date
-    date_y     = top_y - (4 * mm)           # Date Row
+    # --- REALIGNED POSITIONS (MATCHING YOUR TARGET TEMPLATE) ---
+    date_x     = left_margin + (133 * mm)   # Shifted RIGHT
+    date_y     = top_y - (4 * mm)
 
-    payee_x    = left_margin + (12 * mm)    # Column for Payee
-    payee_y    = top_y - (15 * mm)          # Payee Row
+    payee_x    = left_margin + (0 * mm)     # Shifted LEFT
+    payee_y    = top_y - (15 * mm)
 
-    amt_num_x  = left_margin + (127 * mm)   # Column for Numeric Amount
-    amt_num_y  = top_y - (15 * mm)          # Same row as Payee
+    amt_num_x  = left_margin + (138 * mm)   # Shifted RIGHT
+    amt_num_y  = top_y - (15 * mm)
 
-    words_x    = left_margin + (5 * mm)     # Column for Amount in Words
-    words_y    = top_y - (24 * mm)          # Words Row
+    words_x    = left_margin - (5 * mm)     # Shifted LEFT
+    words_y    = top_y - (24 * mm)
 
-    # 1. Print Date with your exact Google Apps Script spacing
+    # 1. Spaced Date
     spaced_date = format_cheque_date_exact(cheque_date_str)
     pdf.setFont(font_bold, 10)
     pdf.drawString(date_x, date_y, spaced_date)
 
-    # 2. Print Payee Name
+    # 2. Payee Name
     pdf.setFont(font_bold, 9)
     pdf.drawString(payee_x, payee_y, str(supplier).upper())
 
-    # 3. Print Numeric Amount
+    # 3. Numeric Amount
     pdf.setFont(font_bold, 10)
     pdf.drawString(amt_num_x, amt_num_y, f"{total_amt:,.2f}")
 
-    # 4. Print Amount in Words
+    # 4. Clean Amount in Words
     words_text = cheque_amount_to_words(total_amt)
     pdf.setFont(font_bold, 9)
     pdf.drawString(words_x, words_y, words_text)
