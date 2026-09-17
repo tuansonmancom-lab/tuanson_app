@@ -918,19 +918,17 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     elements.append(Spacer(1, 10))
 
     # Defaults
+    # Fetch PO, Project, Cheque No, and Cheque Date directly from database
     po_no = ""
     project_name = "General Site Works"
-    bank_code = "10330"
-    bank_name = "Cash in Bank BDO"
     cheque_no = "---"
     cheque_date_val = "[ PENDING ]"
     
-    # Query updated cheque info directly from deliveries table
     if conn and cv_no:
         try:
             cur = conn.cursor()
             row = cur.execute("""
-                SELECT pono, project_name, cheque_no, cheque_date 
+                SELECT pono, project_name, cheque_no, cheque_date, apv_number 
                 FROM deliveries 
                 WHERE cv_number = ?
             """, (cv_no,)).fetchone()
@@ -942,8 +940,17 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
                     cheque_no = str(row[2]).strip()
                 if row[3] and str(row[3]).strip():
                     cheque_date_val = str(row[3]).strip()
+                apv_no = row[4] or ""
         except Exception:
             pass
+
+    # Dynamic Description for PDF
+    if apv_no:
+        desc_str = f"Payment for materials / services for {project_name} (PO#{po_no})"
+        acct_code_str = "20100"
+    else:
+        desc_str = f"ADVANCE PDC PAYMENT FOR PO#{po_no} ({project_name.upper()})"
+        acct_code_str = "10500"
 
     date_formatted = cv_date.split()[0] if cv_date else datetime.now().strftime('%Y-%m-%d')
 
@@ -2844,6 +2851,109 @@ elif role == "Accounting":
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
             #========================================================================
+
+    #================================================================================
+    st.subheader("💳 Process Payment & Issue Check Voucher")
+
+# Toggle between Standard Payment vs Advance PDC
+pay_basis = st.radio("Payment Mode:", ["Standard Payment (APV)", "Advance PDC / Downpayment (PO Basis)"], horizontal=True)
+
+if pay_basis == "Standard Payment (APV)":
+    # --- 1. APV BASIS (POST-DELIVERY) ---
+    unpaid_apvs = c.execute("""
+        SELECT apv_number, supplier, total_amount, project_name 
+        FROM deliveries 
+        WHERE apv_number IS NOT NULL AND apv_number != '' AND (cv_number IS NULL OR cv_number = '')
+    """).fetchall()
+    
+    if unpaid_apvs:
+        apv_options = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in unpaid_apvs]
+        selected_apv = st.selectbox("Select APV Number to Pay", apv_options)
+        target_apv_no = selected_apv.split(" - ")[0]
+        
+        # Get details
+        row = [r for r in unpaid_apvs if r[0] == target_apv_no][0]
+        supplier_name, total_amt, project_name = row[1], row[2], row[3]
+        target_po_no = ""
+        
+        debit_acct_code = "20100"
+        debit_acct_name = f"Accounts Payable - {supplier_name}"
+    else:
+        st.info("No pending APVs available for payment.")
+        selected_apv = None
+
+else:
+    # --- 2. PO BASIS (ADVANCE PDC PRE-DELIVERY) ---
+    unpaid_pos = c.execute("""
+        SELECT DISTINCT pono, supplier, total_amount, project_name 
+        FROM deliveries 
+        WHERE pono IS NOT NULL AND pono != '' AND (apv_number IS NULL OR apv_number = '') AND (cv_number IS NULL OR cv_number = '')
+    """).fetchall()
+    
+    if unpaid_pos:
+        po_options = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in unpaid_pos]
+        selected_po = st.selectbox("Select PO Number for Advance PDC", po_options)
+        target_po_no = selected_po.split(" - ")[0]
+        
+        # Get details
+        row = [r for r in unpaid_pos if r[0] == target_po_no][0]
+        supplier_name, total_amt, project_name = row[1], row[2], row[3]
+        target_apv_no = ""
+        
+        debit_acct_code = "10500"
+        debit_acct_name = f"Advances to Suppliers - {supplier_name}"
+    else:
+        st.info("No open POs available for advance check issuance.")
+        selected_po = None
+
+# --- PROCESS ISSUANCE BUTTON ---
+if (pay_basis == "Standard Payment (APV)" and selected_apv) or (pay_basis == "Advance PDC / Downpayment (PO Basis)" and selected_po):
+    col_c1, col_c2 = st.columns(2)
+    bank_account = col_c1.selectbox("Funding Bank Account", ["10330 - Cash in Bank BDO", "10310 - Cash in Bank MBTC"])
+    bank_code = bank_account.split(" - ")[0]
+    
+    cv_num = generate_voucher_number("CV", conn)
+    st.write(f"**Generated Check Voucher No:** `{cv_num}`")
+    
+    col_d1, col_d2 = st.columns(2)
+    cheque_no_input = col_d1.text_input("Cheque Number (Optional)", value="")
+    cheque_date_input = col_d2.date_input("Cheque Date (PDC Date)", value=datetime.now().date())
+    
+    if st.button("🚀 Issue Check & Post GL Entry", type="primary"):
+        c_date_str = cheque_date_input.strftime("%Y-%m-%d")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 1. Update Deliveries Table
+        if target_apv_no:
+            c.execute("""
+                UPDATE deliveries 
+                SET cv_number = ?, cv_date = ?, cheque_no = ?, cheque_date = ?
+                WHERE apv_number = ?
+            """, (cv_num, now_str, cheque_no_input.strip(), c_date_str, target_apv_no))
+        else:
+            c.execute("""
+                UPDATE deliveries 
+                SET cv_number = ?, cv_date = ?, cheque_no = ?, cheque_date = ?
+                WHERE pono = ?
+            """, (cv_num, now_str, cheque_no_input.strip(), c_date_str, target_po_no))
+        
+        # 2. Post Double-Entry Journal Entries
+        # DEBIT: Accounts Payable OR Advances to Suppliers
+        c.execute("""
+            INSERT INTO journal_entries (doc_number, doc_date, account_code, account_name, debit, credit, project_name)
+            VALUES (?, ?, ?, ?, ?, 0.0, ?)
+        """, (cv_num, c_date_str, debit_acct_code, debit_acct_name, total_amt, project_name))
+        
+        # CREDIT: Cash in Bank
+        c.execute("""
+            INSERT INTO journal_entries (doc_number, doc_date, account_code, account_name, debit, credit, project_name)
+            VALUES (?, ?, ?, ?, 0.0, ?, ?)
+        """, (cv_num, c_date_str, bank_code, f"Cash in Bank ({bank_code})", total_amt, project_name))
+        
+        conn.commit()
+        st.success(f"🎉 Check Voucher {cv_num} successfully issued for {supplier_name}!")
+        st.rerun()
+    #================================================================================
             
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
