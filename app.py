@@ -820,14 +820,38 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     return buffer.getvalue()
 
 # --- CV PDF GENERATOR FUNCTION ---
-import io
-from datetime import datetime
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
+    # Fetch PO, Project, Cheque No, and Cheque Date directly from database
+    po_no = ""
+    project_name = "General Site Works"
+    cheque_no = "---"
+    cheque_date_val = "[ PENDING ]"
+    
+    if conn and cv_no:
+        try:
+            cur = conn.cursor()
+            row = cur.execute("""
+                SELECT pono, project_name, cheque_no, cheque_date 
+                FROM deliveries 
+                WHERE cv_number = ?
+            """, (cv_no,)).fetchone()
+            
+            if row:
+                po_no = row[0] or ""
+                project_name = row[1] or "General Site Works"
+                if row[2]:
+                    cheque_no = row[2]
+                if row[3]:
+                    cheque_date_val = row[3]
+        except Exception:
+            pass
 
-def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, cheque_no="1042467", conn=None):
+    date_formatted = cv_date.split()[0] if cv_date else datetime.now().strftime('%Y-%m-%d')
+
+    # Header metadata string
+    voucher_meta = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {date_formatted}<br/><b>CHEQUE NO.:</b> {cheque_no} / {cheque_date_val}"
+    
+    # ... Rest of your create_cv_pdf code remains identical ...
     import io
     from datetime import datetime
     from reportlab.lib.pagesizes import letter
@@ -2144,8 +2168,17 @@ elif role == "Office Manager":
 
 # --- ROLE 5: ACCOUNTING ---
 elif role == "Accounting":
-    from datetime import datetime, timedelta
 
+    # Automatic schema migration for cheque tracking
+    for col_def in ["cheque_no TEXT", "cheque_date TEXT"]:
+    try:
+        c.execute(f"ALTER TABLE deliveries ADD COLUMN {col_def}")
+        conn.commit()
+    except Exception:
+        pass
+        
+    from datetime import datetime, timedelta
+    
     # Automatic schema migration check for project_name column
     try:
         c.execute("ALTER TABLE journal_entries ADD COLUMN project_name TEXT")
@@ -2560,6 +2593,53 @@ elif role == "Accounting":
                     else:
                         st.error("⚠️ Payee Name, Voucher Number, and a valid Amount greater than 0 are required.")
 
+        # --- TAB 2: UPDATE CHEQUE DATE & NUMBER EXPANDER ---
+        st.markdown("---")
+        with st.expander("✏️ Update Cheque Date / Cheque Number for Issued Vouchers"):
+            issued_cv_rows = c.execute("""
+                SELECT cv_number, supplier, total_amount, cheque_no, cheque_date 
+                FROM deliveries 
+                WHERE cv_number IS NOT NULL AND cv_number != ''
+                ORDER BY cv_date DESC
+            """).fetchall()
+            
+            if issued_cv_rows:
+                cv_list = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in issued_cv_rows]
+                selected_cv_str = st.selectbox("Select Voucher to Update", cv_list)
+                target_cv_no = selected_cv_str.split(" - ")[0]
+                
+                # Retrieve current details
+                cur_row = [r for r in issued_cv_rows if r[0] == target_cv_no][0]
+                existing_cnum = cur_row[3] if cur_row[3] else ""
+                existing_cdate = cur_row[4] if cur_row[4] else ""
+                
+                col_u1, col_u2 = st.columns(2)
+                updated_cnum = col_u1.text_input("Cheque Number", value=existing_cnum, key=f"cnum_{target_cv_no}")
+                
+                # Checkbox allowing accounting to toggle whether the cheque is dated yet
+                has_date = col_u2.checkbox("Set Exact Cheque Date", value=bool(existing_cdate))
+                
+                if has_date:
+                    try:
+                        default_dt = datetime.strptime(existing_cdate, "%Y-%m-%d").date()
+                    except Exception:
+                        default_dt = datetime.now().date()
+                    updated_cdate_input = col_u2.date_input("Cheque Date", value=default_dt)
+                    final_cdate_str = updated_cdate_input.strftime("%Y-%m-%d")
+                else:
+                    final_cdate_str = ""
+
+                if st.button("💾 Save Cheque Details", type="primary"):
+                    c.execute("""
+                        UPDATE deliveries 
+                        SET cheque_no = ?, cheque_date = ? 
+                        WHERE cv_number = ?
+                    """, (updated_cnum.strip(), final_cdate_str, target_cv_no))
+                    conn.commit()
+                    st.success(f"🎉 Cheque details updated for {target_cv_no}!")
+                    st.rerun()
+            else:
+                st.info("No issued vouchers available to update.")
        # --- REPLACE THIS AT THE VERY BOTTOM OF TAB 2 (tab_payment) ---
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
