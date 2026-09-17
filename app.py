@@ -821,37 +821,6 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
 
 # --- CV PDF GENERATOR FUNCTION ---
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
-    # Fetch PO, Project, Cheque No, and Cheque Date directly from database
-    po_no = ""
-    project_name = "General Site Works"
-    cheque_no = "---"
-    cheque_date_val = "[ PENDING ]"
-    
-    if conn and cv_no:
-        try:
-            cur = conn.cursor()
-            row = cur.execute("""
-                SELECT pono, project_name, cheque_no, cheque_date 
-                FROM deliveries 
-                WHERE cv_number = ?
-            """, (cv_no,)).fetchone()
-            
-            if row:
-                po_no = row[0] or ""
-                project_name = row[1] or "General Site Works"
-                if row[2]:
-                    cheque_no = row[2]
-                if row[3]:
-                    cheque_date_val = row[3]
-        except Exception:
-            pass
-
-    date_formatted = cv_date.split()[0] if cv_date else datetime.now().strftime('%Y-%m-%d')
-
-    # Header metadata string
-    voucher_meta = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {date_formatted}<br/><b>CHEQUE NO.:</b> {cheque_no} / {cheque_date_val}"
-    
-    # ... Rest of your create_cv_pdf code remains identical ...
     import io
     from datetime import datetime
     from reportlab.lib.pagesizes import letter
@@ -859,7 +828,6 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-    # Use Roboto if registered, fallback to Helvetica if font files aren't found
     font_regular = "Roboto" if ROBOTO_READY else "Helvetica"
     font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
 
@@ -874,7 +842,6 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     )
     styles = getSampleStyleSheet()
 
-    # Style definitions using custom Roboto font
     title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=15, leading=18, alignment=1, fontName=font_bold)
     company_style = ParagraphStyle('CompanyHeader', parent=styles['Normal'], fontSize=12, leading=14, alignment=1, fontName=font_bold)
     sub_style = ParagraphStyle('SubHeader', parent=styles['Normal'], fontSize=8, leading=10, alignment=1, fontName=font_regular)
@@ -895,26 +862,39 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     elements.append(Paragraph("Payment Voucher", title_style))
     elements.append(Spacer(1, 10))
 
+    # Defaults
     po_no = ""
     project_name = "General Site Works"
     bank_code = "10330"
     bank_name = "Cash in Bank BDO"
+    cheque_no = "---"
+    cheque_date_val = "[ PENDING ]"
     
-    if conn and apv_no:
+    # Query updated cheque info directly from deliveries table
+    if conn and cv_no:
         try:
             cur = conn.cursor()
-            row = cur.execute("SELECT pono, project_name FROM deliveries WHERE apv_number = ?", (apv_no,)).fetchone()
+            row = cur.execute("""
+                SELECT pono, project_name, cheque_no, cheque_date 
+                FROM deliveries 
+                WHERE cv_number = ?
+            """, (cv_no,)).fetchone()
+            
             if row:
                 po_no = row[0] or ""
                 project_name = row[1] or "General Site Works"
+                if row[2] and str(row[2]).strip():
+                    cheque_no = str(row[2]).strip()
+                if row[3] and str(row[3]).strip():
+                    cheque_date_val = str(row[3]).strip()
         except Exception:
             pass
 
     date_formatted = cv_date.split()[0] if cv_date else datetime.now().strftime('%Y-%m-%d')
 
-    # 2. Payee & Voucher Metadata
+    # 2. Payee & Voucher Metadata (Uses updated cheque_date_val)
     payee_text = f"<b>{supplier}</b><br/>Cebu, Philippines"
-    voucher_meta = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {date_formatted}<br/><b>CHEQUE NO.:</b> {cheque_no} / {date_formatted}"
+    voucher_meta = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {date_formatted}<br/><b>CHEQUE NO.:</b> {cheque_no} / {cheque_date_val}"
 
     info_table = Table([
         [Paragraph(payee_text, cell_style), Paragraph(voucher_meta, cell_style)]
@@ -931,7 +911,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     elements.append(info_table)
     elements.append(Spacer(1, 8))
 
-    # 3. Account Particulars (Using ₱)
+    # 3. Account Particulars
     desc_str = f"Payment for materials / services for {project_name}" + (f" (PO#{po_no})" if po_no else "")
     acct_data = [
         [Paragraph("<b>A/C CODE</b>", cell_bold), Paragraph("<b>A/C NAME</b>", cell_bold), Paragraph("<b>DESCRIPTION</b>", cell_bold), Paragraph("<b>AMOUNT</b>", cell_right_bold)],
@@ -989,7 +969,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     elements.append(pay_det_table)
     elements.append(Spacer(1, 10))
 
-    # 6. Summary & Amount in Words (Using ₱)
+    # 6. Summary & Amount in Words
     amt_words = amount_to_words(total_amt)
     summary_data = [
         [
