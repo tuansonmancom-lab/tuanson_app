@@ -876,16 +876,6 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
 
 # --- CV PDF GENERATOR FUNCTION ---
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
-    import io
-    from datetime import datetime
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-
-    font_regular = "Roboto" if ROBOTO_READY else "Helvetica"
-    font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
-
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -895,38 +885,33 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         topMargin=36,
         bottomMargin=36
     )
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=15, leading=18, alignment=1, fontName=font_bold)
-    company_style = ParagraphStyle('CompanyHeader', parent=styles['Normal'], fontSize=12, leading=14, alignment=1, fontName=font_bold)
-    sub_style = ParagraphStyle('SubHeader', parent=styles['Normal'], fontSize=8, leading=10, alignment=1, fontName=font_regular)
-    
-    cell_style = ParagraphStyle('Cell', parent=styles['Normal'], fontSize=8, leading=10, fontName=font_regular)
-    cell_bold = ParagraphStyle('CellBold', parent=styles['Normal'], fontSize=8, leading=10, fontName=font_bold)
-    cell_right = ParagraphStyle('CellRight', parent=styles['Normal'], fontSize=8, leading=10, alignment=2, fontName=font_regular)
-    cell_right_bold = ParagraphStyle('CellRightBold', parent=styles['Normal'], fontSize=8, leading=10, alignment=2, fontName=font_bold)
-    cell_center_bold = ParagraphStyle('CellCenterBold', parent=styles['Normal'], fontSize=8, leading=10, alignment=1, fontName=font_bold)
-
     elements = []
 
-    # 1. Company Header
-    elements.append(Paragraph("Tuanson Construction", company_style))
-    elements.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_style))
-    elements.append(Paragraph("Tel: - Fax: -", sub_style))
-    elements.append(Spacer(1, 8))
-    elements.append(Paragraph("Payment Voucher", title_style))
-    elements.append(Spacer(1, 10))
+    # --- 1. SAFELY INITIALIZE BANK & DEBIT DEFAULT VALUES ---
+    bank_code = "10330"
+    bank_name = "Cash in Bank BDO"
+    
+    # Standard APV vs Advance PDC Debit Logic
+    if apv_no and str(apv_no).strip():
+        debit_code = "20100"
+        debit_name = f"Accounts Payable - {supplier}"
+        desc_summary = f"Payment for materials / services (APV#{apv_no})"
+    else:
+        debit_code = "10500"
+        debit_name = f"Advances to Suppliers - {supplier}"
+        desc_summary = f"ADVANCE PDC PAYMENT FOR PO"
 
-    # Defaults
-    # Fetch PO, Project, Cheque No, and Cheque Date directly from database
     po_no = ""
     project_name = "General Site Works"
     cheque_no = "---"
     cheque_date_val = "[ PENDING ]"
-    
+
+    # --- 2. FETCH REAL DATABASE DETAILS IF AVAILABLE ---
     if conn and cv_no:
         try:
             cur = conn.cursor()
+            
+            # Fetch Delivery / Check info
             row = cur.execute("""
                 SELECT pono, project_name, cheque_no, cheque_date, apv_number 
                 FROM deliveries 
@@ -940,129 +925,206 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
                     cheque_no = str(row[2]).strip()
                 if row[3] and str(row[3]).strip():
                     cheque_date_val = str(row[3]).strip()
-                apv_no = row[4] or ""
+                if row[4] and str(row[4]).strip():
+                    apv_no = str(row[4]).strip()
+
+            # Fetch Bank / Journal Info
+            credit_je = cur.execute("""
+                SELECT account_code, account_name 
+                FROM journal_entries 
+                WHERE doc_number = ? AND credit > 0
+            """, (cv_no,)).fetchone()
+            
+            if credit_je:
+                bank_code = credit_je[0] or "10330"
+                bank_name = credit_je[1] or "Cash in Bank BDO"
+
+            debit_je = cur.execute("""
+                SELECT account_code, account_name 
+                FROM journal_entries 
+                WHERE doc_number = ? AND debit > 0
+            """, (cv_no,)).fetchone()
+            
+            if debit_je:
+                debit_code = debit_je[0] or debit_code
+                debit_name = debit_je[1] or debit_name
+
         except Exception:
             pass
 
-    # Dynamic Description for PDF
-    if apv_no:
-        desc_str = f"Payment for materials / services for {project_name} (PO#{po_no})"
-        acct_code_str = "20100"
-    else:
-        desc_str = f"ADVANCE PDC PAYMENT FOR PO#{po_no} ({project_name.upper()})"
-        acct_code_str = "10500"
+    # Dynamic Description
+    if po_no:
+        desc_summary += f" (PO#{po_no})"
+    if project_name:
+        desc_summary += f" for {project_name}"
 
-    date_formatted = cv_date.split()[0] if cv_date else datetime.now().strftime('%Y-%m-%d')
+    # Date formatting
+    try:
+        if isinstance(cv_date, str):
+            date_formatted = cv_date.split()[0]
+        else:
+            date_formatted = cv_date.strftime("%Y-%m-%d")
+    except Exception:
+        date_formatted = str(cv_date)
 
-    # 2. Payee & Voucher Metadata (Uses updated cheque_date_val)
-    payee_text = f"<b>{supplier}</b><br/>Cebu, Philippines"
-    voucher_meta = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {date_formatted}<br/><b>CHEQUE NO.:</b> {cheque_no} / {cheque_date_val}"
+    # --- STYLES ---
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'TitleStyle',
+        parent=styles['Heading1'],
+        fontName='Roboto-Bold' if ROBOTO_READY else 'Helvetica-Bold',
+        fontSize=16,
+        leading=20,
+        alignment=1, # Center
+        spaceAfter=15
+    )
+    company_style = ParagraphStyle(
+        'CompanyStyle',
+        parent=styles['Normal'],
+        fontName='Roboto-Bold' if ROBOTO_READY else 'Helvetica-Bold',
+        fontSize=12,
+        leading=15,
+        alignment=1
+    )
+    sub_style = ParagraphStyle(
+        'SubStyle',
+        parent=styles['Normal'],
+        fontName='Roboto' if ROBOTO_READY else 'Helvetica',
+        fontSize=8,
+        leading=11,
+        alignment=1,
+        spaceAfter=10
+    )
+    cell_bold = ParagraphStyle(
+        'CellBold',
+        parent=styles['Normal'],
+        fontName='Roboto-Bold' if ROBOTO_READY else 'Helvetica-Bold',
+        fontSize=8,
+        leading=10
+    )
+    cell_style = ParagraphStyle(
+        'CellStyle',
+        parent=styles['Normal'],
+        fontName='Roboto' if ROBOTO_READY else 'Helvetica',
+        fontSize=8,
+        leading=10
+    )
+    cell_right = ParagraphStyle(
+        'CellRight',
+        parent=styles['Normal'],
+        fontName='Roboto' if ROBOTO_READY else 'Helvetica',
+        fontSize=8,
+        leading=10,
+        alignment=2
+    )
 
-    info_table = Table([
-        [Paragraph(payee_text, cell_style), Paragraph(voucher_meta, cell_style)]
-    ], colWidths=[360, 180])
-    info_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+    # Header Section
+    elements.append(Paragraph("Tuanson Construction", company_style))
+    elements.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu<br/>Tel: - Fax: -", sub_style))
+    elements.append(Paragraph("Payment Voucher", title_style))
+
+    # Box 1: Supplier & Voucher Info
+    cheque_display = f"{cheque_no} / {cheque_date_val}" if cheque_no != "---" else "---"
+    meta_table_data = [
+        [
+            Paragraph(f"<b>CEBU DIAMOND INDUSTRIAL</b><br/>{supplier}<br/>Cebu, Philippines", cell_style),
+            Paragraph(f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {date_formatted}<br/><b>CHEQUE NO.:</b> {cheque_display}", cell_style)
+        ]
+    ]
+    meta_table = Table(meta_table_data, colWidths=[360, 180])
+    meta_table.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
         ('TOPPADDING', (0,0), (-1,-1), 6),
         ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
-        ('RIGHTPADDING', (0,0), (-1,-1), 6),
     ]))
-    elements.append(info_table)
+    elements.append(meta_table)
     elements.append(Spacer(1, 8))
 
-    # 3. Account Particulars
-    desc_str = f"Payment for materials / services for {project_name}" + (f" (PO#{po_no})" if po_no else "")
-    acct_data = [
-        [Paragraph("<b>A/C CODE</b>", cell_bold), Paragraph("<b>A/C NAME</b>", cell_bold), Paragraph("<b>DESCRIPTION</b>", cell_bold), Paragraph("<b>AMOUNT</b>", cell_right_bold)],
-        [Paragraph("20100", cell_style), Paragraph(supplier, cell_style), Paragraph(desc_str, cell_style), Paragraph(f"₱{total_amt:,.2f}", cell_right)]
+    # Box 2: Line Items
+    items_data = [
+        [Paragraph("<b>A/C CODE</b>", cell_bold), Paragraph("<b>A/C NAME</b>", cell_bold), Paragraph("<b>DESCRIPTION</b>", cell_bold), Paragraph("<b>AMOUNT</b>", ParagraphStyle('RBold', parent=cell_bold, alignment=2))],
+        [Paragraph(debit_code, cell_style), Paragraph(supplier.upper(), cell_style), Paragraph(desc_summary, cell_style), Paragraph(f"₱{total_amt:,.2f}", cell_right)]
     ]
-    acct_table = Table(acct_data, colWidths=[70, 150, 220, 100])
-    acct_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('LINEBELOW', (0,0), (-1,0), 0.5, colors.black),
+    items_table = Table(items_data, colWidths=[70, 150, 240, 80])
+    items_table.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
     ]))
-    elements.append(acct_table)
-    elements.append(Spacer(1, 8))
+    elements.append(items_table)
+    elements.append(Spacer(1, 10))
 
-    # 4. Journals Table
+    # Box 3: Journals (Double-Entry Ledger)
     elements.append(Paragraph("<b>Journals:</b>", cell_bold))
-    elements.append(Spacer(1, 2))
+    elements.append(Spacer(1, 4))
     
+    bank_full_title = f"{bank_code}: {bank_name}" if not bank_name.startswith(bank_code) else bank_name
+
     journal_data = [
-        [Paragraph("<b>Doc No.</b>", cell_bold), Paragraph("<b>Date</b>", cell_bold), Paragraph("<b>Account #</b>", cell_bold), Paragraph("<b>Account Name</b>", cell_bold), Paragraph("<b>Debit</b>", cell_right_bold), Paragraph("<b>Credit</b>", cell_right_bold)],
-        [Paragraph(cv_no, cell_style), Paragraph(date_formatted, cell_style), Paragraph("20100", cell_style), Paragraph(f"Accounts Payable - {supplier}", cell_style), Paragraph(f"{total_amt:,.2f}", cell_right), Paragraph("", cell_right)],
-        [Paragraph(cv_no, cell_style), Paragraph(date_formatted, cell_style), Paragraph(bank_code, cell_style), Paragraph(f"{bank_code}: {bank_name}", cell_style), Paragraph("", cell_right), Paragraph(f"{total_amt:,.2f}", cell_right)],
-        [Paragraph("", cell_style), Paragraph("", cell_style), Paragraph("", cell_style), Paragraph("<b>TOTAL</b>", cell_right_bold), Paragraph(f"<b>{total_amt:,.2f}</b>", cell_right_bold), Paragraph(f"<b>{total_amt:,.2f}</b>", cell_right_bold)]
+        [Paragraph("<b>Doc No.</b>", cell_bold), Paragraph("<b>Date</b>", cell_bold), Paragraph("<b>Account #</b>", cell_bold), Paragraph("<b>Account Name</b>", cell_bold), Paragraph("<b>Debit</b>", ParagraphStyle('RB1', parent=cell_bold, alignment=2)), Paragraph("<b>Credit</b>", ParagraphStyle('RB2', parent=cell_bold, alignment=2))],
+        # Debit Row
+        [Paragraph(cv_no, cell_style), Paragraph(date_formatted, cell_style), Paragraph(debit_code, cell_style), Paragraph(debit_name, cell_style), Paragraph(f"{total_amt:,.2f}", cell_right), Paragraph("", cell_right)],
+        # Credit Row
+        [Paragraph(cv_no, cell_style), Paragraph(date_formatted, cell_style), Paragraph(bank_code, cell_style), Paragraph(bank_full_title, cell_style), Paragraph("", cell_right), Paragraph(f"{total_amt:,.2f}", cell_right)],
+        # Total Row
+        [Paragraph("", cell_style), Paragraph("", cell_style), Paragraph("", cell_style), Paragraph("<b>TOTAL</b>", ParagraphStyle('RTot', parent=cell_bold, alignment=2)), Paragraph(f"<b>{total_amt:,.2f}</b>", ParagraphStyle('RT1', parent=cell_bold, alignment=2)), Paragraph(f"<b>{total_amt:,.2f}</b>", ParagraphStyle('RT2', parent=cell_bold, alignment=2))]
     ]
-    journal_table = Table(journal_data, colWidths=[65, 60, 60, 185, 85, 85])
+    journal_table = Table(journal_data, colWidths=[70, 65, 65, 180, 80, 80])
     journal_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('LINEBELOW', (0,0), (-1,0), 0.5, colors.black),
-        ('LINEABOVE', (0,-1), (-1,-1), 0.5, colors.black),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
+        ('LINEABOVE', (0,-1), (-1,-1), 1, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('TOPPADDING', (0,0), (-1,-1), 4),
         ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
     elements.append(journal_table)
-    elements.append(Spacer(1, 8))
+    elements.append(Spacer(1, 10))
 
-    # 5. Payment Details Table
-    elements.append(Paragraph("<b>PAYMENT DETAILS</b>", cell_bold))
-    elements.append(Spacer(1, 2))
-    
-    pay_det_data = [
-        [Paragraph("<b>Type</b>", cell_bold), Paragraph("<b>Doc. No.</b>", cell_bold), Paragraph("<b>Doc. Date</b>", cell_bold), Paragraph("<b>Description</b>", cell_bold), Paragraph("<b>Orig. Amount</b>", cell_right_bold), Paragraph("<b>Paid Amount</b>", cell_right_bold)],
-        [Paragraph("BIL", cell_style), Paragraph(f"PO#{po_no}" if po_no else f"APV#{apv_no}", cell_style), Paragraph(date_formatted, cell_style), Paragraph(f"PAYABLE FOR MATERIALS FOR \"{project_name.upper()}\"", cell_style), Paragraph(f"{total_amt:,.2f}", cell_right), Paragraph(f"{total_amt:,.2f}", cell_right)]
+    # Box 4: Payment Details
+    pay_details_data = [
+        [Paragraph("<b>Type</b>", cell_bold), Paragraph("<b>Doc. No.</b>", cell_bold), Paragraph("<b>Doc. Date</b>", cell_bold), Paragraph("<b>Description</b>", cell_bold), Paragraph("<b>Orig. Amount</b>", ParagraphStyle('RB3', parent=cell_bold, alignment=2)), Paragraph("<b>Paid Amount</b>", ParagraphStyle('RB4', parent=cell_bold, alignment=2))],
+        [Paragraph("BIL", cell_style), Paragraph(f"PO#{po_no}" if po_no else (apv_no or "---"), cell_style), Paragraph(date_formatted, cell_style), Paragraph(f"PAYABLE FOR MATERIALS FOR \"{project_name.upper()}\"", cell_style), Paragraph(f"{total_amt:,.2f}", cell_right), Paragraph(f"{total_amt:,.2f}", cell_right)]
     ]
-    pay_det_table = Table(pay_det_data, colWidths=[40, 75, 65, 200, 80, 80])
-    pay_det_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('LINEBELOW', (0,0), (-1,0), 0.5, colors.black),
+    pay_details_table = Table(pay_details_data, colWidths=[40, 75, 65, 200, 80, 80])
+    pay_details_table.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('TOPPADDING', (0,0), (-1,-1), 4),
         ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
-    elements.append(pay_det_table)
+    elements.append(pay_details_table)
     elements.append(Spacer(1, 10))
 
-    # 6. Summary & Amount in Words
-    amt_words = amount_to_words(total_amt)
-    summary_data = [
+    # Box 5: Amount in Words & Totals Block
+    words_text = cheque_amount_to_words(total_amt)
+    amount_block = [
         [
-            Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words}", cell_style),
-            Paragraph(f"<b>SUB TOTAL:</b> ₱{total_amt:,.2f}<br/><b>ROUNDING ADJ:</b> 0.00<br/><b>NET TOTAL PHP:</b> ₱{total_amt:,.2f}", cell_right_bold)
+            Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>PHILIPPINE PESO {words_text}", cell_style),
+            Paragraph(f"<b>SUB TOTAL: ₱{total_amt:,.2f}</b><br/>ROUNDING ADJ: 0.00<br/><b>NET TOTAL PHP: ₱{total_amt:,.2f}</b>", ParagraphStyle('RSum', parent=cell_style, alignment=2))
         ]
     ]
-    summary_table = Table(summary_data, colWidths=[370, 170])
-    summary_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    amount_table = Table(amount_block, colWidths=[360, 180])
+    amount_table.setStyle(TableStyle([
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('TOPPADDING', (0,0), (-1,-1), 6),
         ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
-        ('RIGHTPADDING', (0,0), (-1,-1), 6),
     ]))
-    elements.append(summary_table)
-    elements.append(Spacer(1, 30))
+    elements.append(amount_table)
+    elements.append(Spacer(1, 40))
 
-    # 7. Signatures
+    # Box 6: Signatures
     sig_data = [
-        [
-            Paragraph("_______________________________<br/><b>APPROVED BY</b>", cell_center_bold),
-            Paragraph("_______________________________<br/><b>RECEIVED BY</b>", cell_center_bold)
-        ]
+        [Paragraph("_______________________________<br/><b>APPROVED BY</b>", ParagraphStyle('Sig1', parent=cell_style, alignment=1)),
+         Paragraph("_______________________________<br/><b>RECEIVED BY</b>", ParagraphStyle('Sig2', parent=cell_style, alignment=1))]
     ]
     sig_table = Table(sig_data, colWidths=[270, 270])
-    sig_table.setStyle(TableStyle([
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-    ]))
     elements.append(sig_table)
 
     doc.build(elements)
