@@ -6,6 +6,49 @@ import os
 from datetime import datetime
 from io import BytesIO
 
+def amount_to_words(amount):
+    """Converts numeric amounts to formal Philippine Currency words."""
+    try:
+        amount = float(amount)
+    except (ValueError, TypeError):
+        return "ZERO PESOS ONLY"
+    
+    pesos = int(amount)
+    cents = int(round((amount - pesos) * 100))
+    
+    units = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", 
+             "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN", 
+             "SEVENTEEN", "EIGHTEEN", "NINETEEN"]
+    tens = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"]
+
+    def _convert_below_thousand(n):
+        words = []
+        if n >= 100:
+            words.append(units[n // 100] + " HUNDRED")
+            n %= 100
+        if 1 <= n <= 19:
+            words.append(units[n])
+        elif n >= 20:
+            words.append(tens[n // 10] + (" " + units[n % 10] if (n % 10) != 0 else ""))
+        return " ".join(words)
+
+    if pesos == 0:
+        words_str = "ZERO"
+    else:
+        parts = []
+        if pesos >= 1_000_000:
+            parts.append(_convert_below_thousand(pesos // 1_000_000) + " MILLION")
+            pesos %= 1_000_000
+        if pesos >= 1_000:
+            parts.append(_convert_below_thousand(pesos // 1_000) + " THOUSAND")
+            pesos %= 1_000
+        if pesos > 0:
+            parts.append(_convert_below_thousand(pesos))
+        words_str = " ".join(parts)
+
+    cents_str = f"{cents:02d}/100"
+    return f"PHILIPPINE PESO {words_str} AND {cents_str} ONLY"
+
 def generate_voucher_number(c, column_name, prefix):
     """
     Robustly finds the highest sequence number for a given prefix (e.g., APV, CV, CAV)
