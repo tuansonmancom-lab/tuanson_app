@@ -2867,15 +2867,7 @@ elif role == "Accounting":
             else:
                 st.info("No issued vouchers available to update.")
                 
-        #================================================================================
-            # Generate CV Number safely
-        try:
-            cv_num = generate_voucher_number("CV", conn=conn)
-        except TypeError:
-            cv_num = generate_voucher_number("CV")
-            
-        st.write(f"**Generated Check Voucher No:** `{cv_num}`")
-        #================================================================================
+       
 
         #============================================================
         # --- TAB 2: ISSUED VOUCHERS LIST ---
@@ -2923,6 +2915,16 @@ elif role == "Accounting":
 
     #================================================================================
     st.subheader("💳 Process Payment & Issue Check Voucher")
+
+        #================================================================================
+            # Generate CV Number safely
+        try:
+            cv_num = generate_voucher_number("CV", conn=conn)
+        except TypeError:
+            cv_num = generate_voucher_number("CV")
+            
+        st.write(f"**Generated Check Voucher No:** `{cv_num}`")
+        #================================================================================
 
 # Toggle between Standard Payment vs Advance PDC
 pay_basis = st.radio("Payment Mode:", ["Standard Payment (APV)", "Advance PDC / Downpayment (PO Basis)"], horizontal=True)
