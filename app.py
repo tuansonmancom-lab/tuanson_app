@@ -2171,11 +2171,11 @@ elif role == "Accounting":
 
     # Automatic schema migration for cheque tracking
     for col_def in ["cheque_no TEXT", "cheque_date TEXT"]:
-    try:
-        c.execute(f"ALTER TABLE deliveries ADD COLUMN {col_def}")
-        conn.commit()
-    except Exception:
-        pass
+        try:
+            c.execute(f"ALTER TABLE deliveries ADD COLUMN {col_def}")
+            conn.commit()
+        except Exception:
+            pass
         
     from datetime import datetime, timedelta
     
