@@ -1063,8 +1063,78 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     return buffer.getvalue()
 
 #===========================================================================
+from datetime import datetime
+
+# --- HELPER 1: EXACT CHEQUE DATE SPACING ---
+def format_cheque_date_exact(date_str):
+    """Replicates your Google Apps Script custom date spacing for cheque boxes."""
+    if not date_str or date_str == "[ PENDING ]":
+        return ""
+    try:
+        dt = datetime.strptime(str(date_str).split()[0], "%Y-%m-%d")
+        month = f"{dt.month:02d}"
+        day = f"{dt.day:02d}"
+        year = f"{dt.year:04d}"
+
+        # Digits separated by 3 spaces
+        spaced_month = (" " * 3).join(list(month))
+        spaced_day = (" " * 3).join(list(day))
+        spaced_year = (" " * 3).join(list(year))
+
+        # Gaps: 6 spaces between Month & Day, 5 spaces between Day & Year
+        return f"{spaced_month}{' ' * 6}{spaced_day}{' ' * 5}{spaced_year}"
+    except Exception:
+        return str(date_str)
+
+
+# --- HELPER 2: CHEQUE AMOUNT IN WORDS ---
+def cheque_amount_to_words(amount):
+    """Formats amount into cheque words without 'PHILIPPINE PESO' prefix."""
+    try:
+        amount = float(amount)
+    except (ValueError, TypeError):
+        return "ZERO PESOS ONLY"
+    
+    pesos = int(amount)
+    cents = int(round((amount - pesos) * 100))
+    
+    units = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", 
+             "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN", 
+             "SEVENTEEN", "EIGHTEEN", "NINETEEN"]
+    tens = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"]
+
+    def _convert(n):
+        words = []
+        if n >= 100:
+            words.append(units[n // 100] + " HUNDRED")
+            n %= 100
+        if 1 <= n <= 19:
+            words.append(units[n])
+        elif n >= 20:
+            words.append(tens[n // 10] + (" " + units[n % 10] if (n % 10) != 0 else ""))
+        return " ".join(words)
+
+    if pesos == 0:
+        words_str = "ZERO"
+    else:
+        parts = []
+        if pesos >= 1_000_000:
+            parts.append(_convert(pesos // 1_000_000) + " MILLION")
+            pesos %= 1_000_000
+        if pesos >= 1_000:
+            parts.append(_convert(pesos // 1_000) + " THOUSAND")
+            pesos %= 1_000
+        if pesos > 0:
+            parts.append(_convert(pesos))
+        words_str = " ".join(parts)
+
+    if cents > 0:
+        return f"*** {words_str} & {cents:02d}/100 PESOS ONLY ***"
+    return f"*** {words_str} PESOS ONLY ***"
+#===========================================================================
+import io
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
+from reportlab.lib.units import inch, mm
 from reportlab.pdfgen import canvas
 
 def create_cheque_pdf(supplier, total_amt, cheque_date_str):
@@ -1072,17 +1142,29 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     pdf = canvas.Canvas(buffer, pagesize=A4)
     
     font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
-    font_regular = "Roboto" if ROBOTO_READY else "Helvetica"
 
-    # --- ADJUSTABLE millimeter COORDINATES (A4: 210mm wide x 297mm high) ---
-    # Top of A4 page is Y = 297mm.
-    date_x, date_y     = 142 * mm, 273 * mm   # Spaced Cheque Date
-    payee_x, payee_y   = 32 * mm,  262 * mm   # Payee / Supplier Name
-    amt_num_x, amt_num_y = 145 * mm, 262 * mm # Numeric Amount (e.g., 5,625.00)
-    words_x, words_y   = 24 * mm,  253 * mm   # Amount in Words
+    # --- GOOGLE SHEETS MARGINS: left=0.745", top=0.40" ---
+    left_margin = 0.745 * inch   # ~18.92 mm
+    top_margin  = 0.400 * inch   # ~10.16 mm
+    
+    # A4 Page Height = 297mm. Top anchor Y-coordinate in ReportLab:
+    top_y = (297 * mm) - top_margin  # ~286.84 mm
 
-    # 1. Print Spaced Date
-    spaced_date = format_cheque_date(cheque_date_str)
+    # --- COORDINATES MATCHING D4:J10 GRID ---
+    date_x     = left_margin + (125 * mm)   # Column for Date
+    date_y     = top_y - (4 * mm)           # Date Row
+
+    payee_x    = left_margin + (12 * mm)    # Column for Payee
+    payee_y    = top_y - (15 * mm)          # Payee Row
+
+    amt_num_x  = left_margin + (127 * mm)   # Column for Numeric Amount
+    amt_num_y  = top_y - (15 * mm)          # Same row as Payee
+
+    words_x    = left_margin + (5 * mm)     # Column for Amount in Words
+    words_y    = top_y - (24 * mm)          # Words Row
+
+    # 1. Print Date with your exact Google Apps Script spacing
+    spaced_date = format_cheque_date_exact(cheque_date_str)
     pdf.setFont(font_bold, 10)
     pdf.drawString(date_x, date_y, spaced_date)
 
