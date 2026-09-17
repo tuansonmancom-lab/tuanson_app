@@ -6,6 +6,61 @@ import os
 from datetime import datetime
 from io import BytesIO
 
+def format_cheque_date(date_str):
+    """Formats '2026-09-18' into spaced digits: '0 9   1 8   2 0 2 6' for check date boxes."""
+    if not date_str or date_str == "[ PENDING ]":
+        return ""
+    try:
+        dt = datetime.strptime(date_str.split()[0], "%Y-%m-%d")
+        m, d, y = f"{dt.month:02d}", f"{dt.day:02d}", f"{dt.year:04d}"
+        return f"{m[0]} {m[1]}   {d[0]} {d[1]}   {y[0]} {y[1]} {y[2]} {y[3]}"
+    except Exception:
+        return date_str
+
+def cheque_amount_to_words(amount):
+    """Formats amount into cheque words without 'PHILIPPINE PESO' prefix."""
+    try:
+        amount = float(amount)
+    except (ValueError, TypeError):
+        return "ZERO PESOS ONLY"
+    
+    pesos = int(amount)
+    cents = int(round((amount - pesos) * 100))
+    
+    units = ["", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", 
+             "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN", 
+             "SEVENTEEN", "EIGHTEEN", "NINETEEN"]
+    tens = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"]
+
+    def _convert(n):
+        words = []
+        if n >= 100:
+            words.append(units[n // 100] + " HUNDRED")
+            n %= 100
+        if 1 <= n <= 19:
+            words.append(units[n])
+        elif n >= 20:
+            words.append(tens[n // 10] + (" " + units[n % 10] if (n % 10) != 0 else ""))
+        return " ".join(words)
+
+    if pesos == 0:
+        words_str = "ZERO"
+    else:
+        parts = []
+        if pesos >= 1_000_000:
+            parts.append(_convert(pesos // 1_000_000) + " MILLION")
+            pesos %= 1_000_000
+        if pesos >= 1_000:
+            parts.append(_convert(pesos // 1_000) + " THOUSAND")
+            pesos %= 1_000
+        if pesos > 0:
+            parts.append(_convert(pesos))
+        words_str = " ".join(parts)
+
+    if cents > 0:
+        return f"*** {words_str} & {cents:02d}/100 PESOS ONLY ***"
+    return f"*** {words_str} PESOS ONLY ***"
+
 import os
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -105,7 +160,7 @@ def generate_voucher_number(c, column_name, prefix):
             
     next_num = max_num + 1
     return f"{prefix}-{next_num:05d}"
-    
+#=================================================================    
 
 def get_income_statement(conn, start_date, end_date):
     # Convert date objects to text strings for Turso parameter binding
@@ -1006,6 +1061,49 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     doc.build(elements)
     buffer.seek(0)
     return buffer.getvalue()
+
+#===========================================================================
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+
+def create_cheque_pdf(supplier, total_amt, cheque_date_str):
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    
+    font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
+    font_regular = "Roboto" if ROBOTO_READY else "Helvetica"
+
+    # --- ADJUSTABLE millimeter COORDINATES (A4: 210mm wide x 297mm high) ---
+    # Top of A4 page is Y = 297mm.
+    date_x, date_y     = 142 * mm, 273 * mm   # Spaced Cheque Date
+    payee_x, payee_y   = 32 * mm,  262 * mm   # Payee / Supplier Name
+    amt_num_x, amt_num_y = 145 * mm, 262 * mm # Numeric Amount (e.g., 5,625.00)
+    words_x, words_y   = 24 * mm,  253 * mm   # Amount in Words
+
+    # 1. Print Spaced Date
+    spaced_date = format_cheque_date(cheque_date_str)
+    pdf.setFont(font_bold, 10)
+    pdf.drawString(date_x, date_y, spaced_date)
+
+    # 2. Print Payee Name
+    pdf.setFont(font_bold, 9)
+    pdf.drawString(payee_x, payee_y, str(supplier).upper())
+
+    # 3. Print Numeric Amount
+    pdf.setFont(font_bold, 10)
+    pdf.drawString(amt_num_x, amt_num_y, f"{total_amt:,.2f}")
+
+    # 4. Print Amount in Words
+    words_text = cheque_amount_to_words(total_amt)
+    pdf.setFont(font_bold, 9)
+    pdf.drawString(words_x, words_y, words_text)
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+    #==============================================================
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -2620,6 +2718,51 @@ elif role == "Accounting":
                     st.rerun()
             else:
                 st.info("No issued vouchers available to update.")
+
+        #============================================================
+        # --- TAB 2: ISSUED VOUCHERS LIST ---
+        st.markdown("---")
+        st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
+        
+        issued_cvs = c.execute("""
+            SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
+            FROM deliveries 
+            WHERE cv_number IS NOT NULL AND cv_number != ''
+            ORDER BY cv_date DESC
+        """).fetchall()
+        
+        if issued_cvs and HAS_REPORTLAB:
+            for idx, cv in enumerate(issued_cvs):
+                cv_no, cv_date, apv_no, supplier, pay_method, total_amt, c_num, c_date = cv
+                
+                st.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
+                
+                col_btn1, col_btn2 = st.columns(2)
+                
+                # Button 1: Full Payment Voucher Sheet
+                voucher_pdf = create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=conn)
+                col_btn1.download_button(
+                    label="📄 Print Payment Voucher PDF",
+                    data=voucher_pdf,
+                    file_name=f"Voucher_{cv_no}.pdf",
+                    mime="application/pdf",
+                    key=f"print_pv_{cv_no}_{idx}"
+                )
+                
+                # Button 2: A4 Cheque Printing
+                cheque_pdf = create_cheque_pdf(supplier, total_amt, c_date)
+                col_btn2.download_button(
+                    label="🎟️ Print Cheque (A4)",
+                    data=cheque_pdf,
+                    file_name=f"Cheque_{cv_no}.pdf",
+                    mime="application/pdf",
+                    key=f"print_chk_{cv_no}_{idx}"
+                )
+                st.markdown("---")
+        else:
+            st.info("No issued check or payment vouchers available for printing yet.")
+            #========================================================================
+            
        # --- REPLACE THIS AT THE VERY BOTTOM OF TAB 2 (tab_payment) ---
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
