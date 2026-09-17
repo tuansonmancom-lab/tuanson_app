@@ -2866,6 +2866,16 @@ elif role == "Accounting":
                     st.rerun()
             else:
                 st.info("No issued vouchers available to update.")
+                
+        #================================================================================
+            # Generate CV Number safely
+        try:
+            cv_num = generate_voucher_number("CV", conn=conn)
+        except TypeError:
+            cv_num = generate_voucher_number("CV")
+            
+        st.write(f"**Generated Check Voucher No:** `{cv_num}`")
+        #================================================================================
 
         #============================================================
         # --- TAB 2: ISSUED VOUCHERS LIST ---
@@ -3013,14 +3023,7 @@ if (pay_basis == "Standard Payment (APV)" and selected_apv) or (pay_basis == "Ad
         st.success(f"🎉 Check Voucher {cv_num} successfully issued for {supplier_name}!")
         st.rerun()
     #================================================================================
-    # Generate CV Number safely
-    try:
-        cv_num = generate_voucher_number("CV", conn=conn)
-    except TypeError:
-        cv_num = generate_voucher_number("CV")
-        
-    st.write(f"**Generated Check Voucher No:** `{cv_num}`")
-    #================================================================================
+    
             
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
