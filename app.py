@@ -1093,7 +1093,7 @@ def cheque_amount_to_words(amount):
     try:
         amount = float(amount)
     except (ValueError, TypeError):
-        return "ZERO PESOS ONLY"
+        return "ZERO PESOS"
     
     pesos = int(amount)
     cents = int(round((amount - pesos) * 100))
@@ -1129,8 +1129,8 @@ def cheque_amount_to_words(amount):
         words_str = " ".join(parts)
 
     if cents > 0:
-        return f"*** {words_str} & {cents:02d}/100 PESOS ONLY ***"
-    return f"*** {words_str} PESOS ONLY ***"
+        return f"{words_str} & {cents:02d}/100."
+    return f"{words_str} PESOS"
 #===========================================================================
 import io
 from reportlab.lib.pagesizes import A4
