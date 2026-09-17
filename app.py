@@ -1155,13 +1155,13 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     date_y     = top_y - (4 * mm)           # Date Row
 
     payee_x    = left_margin + (12 * mm)    # Column for Payee
-    payee_y    = top_y - (12 * mm)          # Payee Row
+    payee_y    = top_y - (13 * mm)          # Payee Row
 
     amt_num_x  = left_margin + (127 * mm)   # Column for Numeric Amount
-    amt_num_y  = top_y - (12 * mm)          # Same row as Payee
+    amt_num_y  = top_y - (13 * mm)          # Same row as Payee
 
     words_x    = left_margin + (5 * mm)     # Column for Amount in Words
-    words_y    = top_y - (21 * mm)          # Words Row
+    words_y    = top_y - (22 * mm)          # Words Row
 
     # 1. Print Date with your exact Google Apps Script spacing
     spaced_date = format_cheque_date_exact(cheque_date_str)
