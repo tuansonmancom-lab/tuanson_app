@@ -6,6 +6,25 @@ import os
 from datetime import datetime
 from io import BytesIO
 
+import os
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+# Register Roboto fonts for Philippine Peso symbol support
+def register_roboto_font():
+    try:
+        # Update paths if your .ttf files are in a subfolder (e.g., 'fonts/Roboto-Regular.ttf')
+        pdfmetrics.registerFont(TTFont('Roboto', 'Roboto-Regular.ttf'))
+        pdfmetrics.registerFont(TTFont('Roboto-Bold', 'Roboto-Bold.ttf'))
+        return True
+    except Exception as e:
+        print(f"Font registration warning: {e}")
+        return False
+
+# Run registration on app startup
+ROBOTO_READY = register_roboto_font()
+
+
 def amount_to_words(amount):
     """Converts numeric amounts to formal Philippine Currency words."""
     try:
@@ -809,6 +828,17 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, cheque_no="1042467", conn=None):
+    import io
+    from datetime import datetime
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    # Use Roboto if registered, fallback to Helvetica if font files aren't found
+    font_regular = "Roboto" if ROBOTO_READY else "Helvetica"
+    font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -820,16 +850,16 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, chequ
     )
     styles = getSampleStyleSheet()
 
-    # Styling definitions
-    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=15, leading=18, alignment=1, fontName="Helvetica-Bold")
-    company_style = ParagraphStyle('CompanyHeader', parent=styles['Normal'], fontSize=12, leading=14, alignment=1, fontName="Helvetica-Bold")
-    sub_style = ParagraphStyle('SubHeader', parent=styles['Normal'], fontSize=8, leading=10, alignment=1)
+    # Style definitions using custom Roboto font
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=15, leading=18, alignment=1, fontName=font_bold)
+    company_style = ParagraphStyle('CompanyHeader', parent=styles['Normal'], fontSize=12, leading=14, alignment=1, fontName=font_bold)
+    sub_style = ParagraphStyle('SubHeader', parent=styles['Normal'], fontSize=8, leading=10, alignment=1, fontName=font_regular)
     
-    cell_style = ParagraphStyle('Cell', parent=styles['Normal'], fontSize=8, leading=10)
-    cell_bold = ParagraphStyle('CellBold', parent=styles['Normal'], fontSize=8, leading=10, fontName="Helvetica-Bold")
-    cell_right = ParagraphStyle('CellRight', parent=styles['Normal'], fontSize=8, leading=10, alignment=2)
-    cell_right_bold = ParagraphStyle('CellRightBold', parent=styles['Normal'], fontSize=8, leading=10, alignment=2, fontName="Helvetica-Bold")
-    cell_center_bold = ParagraphStyle('CellCenterBold', parent=styles['Normal'], fontSize=8, leading=10, alignment=1, fontName="Helvetica-Bold")
+    cell_style = ParagraphStyle('Cell', parent=styles['Normal'], fontSize=8, leading=10, fontName=font_regular)
+    cell_bold = ParagraphStyle('CellBold', parent=styles['Normal'], fontSize=8, leading=10, fontName=font_bold)
+    cell_right = ParagraphStyle('CellRight', parent=styles['Normal'], fontSize=8, leading=10, alignment=2, fontName=font_regular)
+    cell_right_bold = ParagraphStyle('CellRightBold', parent=styles['Normal'], fontSize=8, leading=10, alignment=2, fontName=font_bold)
+    cell_center_bold = ParagraphStyle('CellCenterBold', parent=styles['Normal'], fontSize=8, leading=10, alignment=1, fontName=font_bold)
 
     elements = []
 
@@ -841,7 +871,6 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, chequ
     elements.append(Paragraph("Payment Voucher", title_style))
     elements.append(Spacer(1, 10))
 
-    # Fetch extra PO / Project context if available
     po_no = ""
     project_name = "General Site Works"
     bank_code = "10330"
@@ -859,7 +888,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, chequ
 
     date_formatted = cv_date.split()[0] if cv_date else datetime.now().strftime('%Y-%m-%d')
 
-    # 2. Top Info Box (Payee vs Voucher Meta)
+    # 2. Payee & Voucher Metadata
     payee_text = f"<b>{supplier}</b><br/>Cebu, Philippines"
     voucher_meta = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {date_formatted}<br/><b>CHEQUE NO.:</b> {cheque_no} / {date_formatted}"
 
@@ -878,10 +907,10 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, chequ
     elements.append(info_table)
     elements.append(Spacer(1, 8))
 
-    # 3. Account / Particulars Header
+    # 3. Account Particulars (Using ₱)
     desc_str = f"Payment for materials / services for {project_name}" + (f" (PO#{po_no})" if po_no else "")
     acct_data = [
-        [Paragraph("<b>A/C CODE</b>", cell_style), Paragraph("<b>A/C NAME</b>", cell_style), Paragraph("<b>DESCRIPTION</b>", cell_style), Paragraph("<b>AMOUNT</b>", cell_right_bold)],
+        [Paragraph("<b>A/C CODE</b>", cell_bold), Paragraph("<b>A/C NAME</b>", cell_bold), Paragraph("<b>DESCRIPTION</b>", cell_bold), Paragraph("<b>AMOUNT</b>", cell_right_bold)],
         [Paragraph("20100", cell_style), Paragraph(supplier, cell_style), Paragraph(desc_str, cell_style), Paragraph(f"₱{total_amt:,.2f}", cell_right)]
     ]
     acct_table = Table(acct_data, colWidths=[70, 150, 220, 100])
@@ -895,12 +924,12 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, chequ
     elements.append(acct_table)
     elements.append(Spacer(1, 8))
 
-    # 4. Journals Table (Double-Entry Posting)
+    # 4. Journals Table
     elements.append(Paragraph("<b>Journals:</b>", cell_bold))
     elements.append(Spacer(1, 2))
     
     journal_data = [
-        [Paragraph("<b>Doc No.</b>", cell_style), Paragraph("<b>Date</b>", cell_style), Paragraph("<b>Account #</b>", cell_style), Paragraph("<b>Account Name</b>", cell_style), Paragraph("<b>Debit</b>", cell_right_bold), Paragraph("<b>Credit</b>", cell_right_bold)],
+        [Paragraph("<b>Doc No.</b>", cell_bold), Paragraph("<b>Date</b>", cell_bold), Paragraph("<b>Account #</b>", cell_bold), Paragraph("<b>Account Name</b>", cell_bold), Paragraph("<b>Debit</b>", cell_right_bold), Paragraph("<b>Credit</b>", cell_right_bold)],
         [Paragraph(cv_no, cell_style), Paragraph(date_formatted, cell_style), Paragraph("20100", cell_style), Paragraph(f"Accounts Payable - {supplier}", cell_style), Paragraph(f"{total_amt:,.2f}", cell_right), Paragraph("", cell_right)],
         [Paragraph(cv_no, cell_style), Paragraph(date_formatted, cell_style), Paragraph(bank_code, cell_style), Paragraph(f"{bank_code}: {bank_name}", cell_style), Paragraph("", cell_right), Paragraph(f"{total_amt:,.2f}", cell_right)],
         [Paragraph("", cell_style), Paragraph("", cell_style), Paragraph("", cell_style), Paragraph("<b>TOTAL</b>", cell_right_bold), Paragraph(f"<b>{total_amt:,.2f}</b>", cell_right_bold), Paragraph(f"<b>{total_amt:,.2f}</b>", cell_right_bold)]
@@ -917,12 +946,12 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, chequ
     elements.append(journal_table)
     elements.append(Spacer(1, 8))
 
-    # 5. Payment Details
+    # 5. Payment Details Table
     elements.append(Paragraph("<b>PAYMENT DETAILS</b>", cell_bold))
     elements.append(Spacer(1, 2))
     
     pay_det_data = [
-        [Paragraph("<b>Type</b>", cell_style), Paragraph("<b>Doc. No.</b>", cell_style), Paragraph("<b>Doc. Date</b>", cell_style), Paragraph("<b>Description</b>", cell_style), Paragraph("<b>Orig. Amount</b>", cell_right_bold), Paragraph("<b>Paid Amount</b>", cell_right_bold)],
+        [Paragraph("<b>Type</b>", cell_bold), Paragraph("<b>Doc. No.</b>", cell_bold), Paragraph("<b>Doc. Date</b>", cell_bold), Paragraph("<b>Description</b>", cell_bold), Paragraph("<b>Orig. Amount</b>", cell_right_bold), Paragraph("<b>Paid Amount</b>", cell_right_bold)],
         [Paragraph("BIL", cell_style), Paragraph(f"PO#{po_no}" if po_no else f"APV#{apv_no}", cell_style), Paragraph(date_formatted, cell_style), Paragraph(f"PAYABLE FOR MATERIALS FOR \"{project_name.upper()}\"", cell_style), Paragraph(f"{total_amt:,.2f}", cell_right), Paragraph(f"{total_amt:,.2f}", cell_right)]
     ]
     pay_det_table = Table(pay_det_data, colWidths=[40, 75, 65, 200, 80, 80])
@@ -936,7 +965,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, chequ
     elements.append(pay_det_table)
     elements.append(Spacer(1, 10))
 
-    # 6. Amount in Words & Summary Box
+    # 6. Summary & Amount in Words (Using ₱)
     amt_words = amount_to_words(total_amt)
     summary_data = [
         [
@@ -956,7 +985,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, chequ
     elements.append(summary_table)
     elements.append(Spacer(1, 30))
 
-    # 7. Signature Lines
+    # 7. Signatures
     sig_data = [
         [
             Paragraph("_______________________________<br/><b>APPROVED BY</b>", cell_center_bold),
