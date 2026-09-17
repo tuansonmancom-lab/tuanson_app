@@ -1063,8 +1063,9 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     return buffer.getvalue()
 
 #===========================================================================
+import io
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
+from reportlab.lib.units import inch, mm
 from reportlab.pdfgen import canvas
 
 def create_cheque_pdf(supplier, total_amt, cheque_date_str):
@@ -1072,17 +1073,29 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     pdf = canvas.Canvas(buffer, pagesize=A4)
     
     font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
-    font_regular = "Roboto" if ROBOTO_READY else "Helvetica"
 
-    # --- ADJUSTABLE millimeter COORDINATES (A4: 210mm wide x 297mm high) ---
-    # Top of A4 page is Y = 297mm.
-    date_x, date_y     = 142 * mm, 273 * mm   # Spaced Cheque Date
-    payee_x, payee_y   = 32 * mm,  262 * mm   # Payee / Supplier Name
-    amt_num_x, amt_num_y = 145 * mm, 262 * mm # Numeric Amount (e.g., 5,625.00)
-    words_x, words_y   = 24 * mm,  253 * mm   # Amount in Words
+    # --- GOOGLE SHEETS MARGINS: left=0.745", top=0.40" ---
+    left_margin = 0.745 * inch   # ~18.92 mm
+    top_margin  = 0.400 * inch   # ~10.16 mm
+    
+    # A4 Page Height = 297mm. Top anchor Y-coordinate in ReportLab:
+    top_y = (297 * mm) - top_margin  # ~286.84 mm
 
-    # 1. Print Spaced Date
-    spaced_date = format_cheque_date(cheque_date_str)
+    # --- COORDINATES MATCHING D4:J10 GRID ---
+    date_x     = left_margin + (125 * mm)   # Column for Date
+    date_y     = top_y - (4 * mm)           # Date Row
+
+    payee_x    = left_margin + (12 * mm)    # Column for Payee
+    payee_y    = top_y - (15 * mm)          # Payee Row
+
+    amt_num_x  = left_margin + (127 * mm)   # Column for Numeric Amount
+    amt_num_y  = top_y - (15 * mm)          # Same row as Payee
+
+    words_x    = left_margin + (5 * mm)     # Column for Amount in Words
+    words_y    = top_y - (24 * mm)          # Words Row
+
+    # 1. Print Date with your exact Google Apps Script spacing
+    spaced_date = format_cheque_date_exact(cheque_date_str)
     pdf.setFont(font_bold, 10)
     pdf.drawString(date_x, date_y, spaced_date)
 
