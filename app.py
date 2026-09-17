@@ -122,44 +122,41 @@ def amount_to_words(amount):
 
     cents_str = f"{cents:02d}/100"
     return f"PHILIPPINE PESO {words_str} AND {cents_str} ONLY"
+#===========================================================
+def generate_voucher_number(prefix="CV", conn=None):
+    """Generates sequential voucher numbers (e.g., CV-2026-0001)."""
+    import datetime
+    year = datetime.datetime.now().strftime("%Y")
+    
+    # Use passed connection or fall back to global/new connection
+    active_conn = conn if conn is not None else (globals().get('conn') or get_db_connection())
+    c = active_conn.cursor()
+    
+    # Check current highest sequence for this prefix and year
+    pattern = f"{prefix}-{year}-%"
+    row = c.execute("""
+        SELECT doc_number FROM journal_entries 
+        WHERE doc_number LIKE ? 
+        ORDER BY id DESC LIMIT 1
+    """, (pattern,)).fetchone()
+    
+    if not row:
+        row = c.execute("""
+            SELECT cv_number FROM deliveries 
+            WHERE cv_number LIKE ? 
+            ORDER BY id DESC LIMIT 1
+        """, (pattern,)).fetchone()
 
-def generate_voucher_number(c, column_name, prefix):
-    """
-    Robustly finds the highest sequence number for a given prefix (e.g., APV, CV, CAV)
-    across all relevant tables and columns, ensuring correct sequencing.
-    """
-    max_num = 0
-    
-    queries = [
-        f"SELECT {column_name} FROM deliveries WHERE {column_name} LIKE '{prefix}-%'",
-        f"SELECT voucher_no FROM journal_entries WHERE voucher_no LIKE '{prefix}-%'"
-    ]
-    
-    for q in queries:
+    if row and row[0]:
         try:
-            c.execute(q)
-            rows = c.fetchall()
-            for row in rows:
-                if row and row[0]:
-                    val = str(row[0]).strip()
-                    parts = val.split('-')
-                    if len(parts) > 1:
-                        try:
-                            num = int(parts[-1])
-                            if num > max_num:
-                                max_num = num
-                        except ValueError:
-                            import re
-                            numbers = re.findall(r'\d+', val)
-                            if numbers:
-                                num = int(numbers[-1])
-                                if num > max_num:
-                                    max_num = num
-        except Exception:
-            continue
-            
-    next_num = max_num + 1
-    return f"{prefix}-{next_num:05d}"
+            last_seq = int(str(row[0]).split("-")[-1])
+            new_seq = last_seq + 1
+        except ValueError:
+            new_seq = 1
+    else:
+        new_seq = 1
+
+    return f"{prefix}-{year}-{new_seq:04d}"
 #=================================================================    
 
 def get_income_statement(conn, start_date, end_date):
