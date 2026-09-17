@@ -1151,7 +1151,7 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     top_y = (297 * mm) - top_margin  # ~286.84 mm
 
     # --- COORDINATES MATCHING D4:J10 GRID ---
-    date_x     = left_margin + (125 * mm)   # Column for Date
+    date_x     = left_margin + (153 * mm)   # Column for Date
     date_y     = top_y - (4 * mm)           # Date Row
 
     payee_x    = left_margin + (12 * mm)    # Column for Payee
