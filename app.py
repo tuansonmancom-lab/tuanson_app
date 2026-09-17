@@ -2595,25 +2595,28 @@ elif role == "Accounting":
             st.info("No generated APVs available for printing yet.")
 
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
+    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV) ---
     with tab_payment:
-        st.write("### 💳 Outstanding Payables with AP Aging Summary")
+        st.write("### 💳 Outstanding Payables & AP Aging Summary")
         
+        # 1. Fetch unpaid deliveries with APVs
         pay_df = pd.read_sql_query("""
             SELECT id, apv_number AS 'APV Number', pono AS 'PO Number', dr_number AS 'DR Number', 
                    supplier AS 'Supplier', total_amount AS 'Total Amount', apv_date AS 'APV Date',
                    project_name AS 'Project'
             FROM deliveries 
-            WHERE payment_status = 'Unpaid' AND apv_number IS NOT NULL AND apv_number != ''
+            WHERE (payment_status = 'Unpaid' OR payment_status IS NULL) 
+              AND apv_number IS NOT NULL AND apv_number != ''
             ORDER BY apv_date ASC
         """, conn)
-
+    
         try:
             terms_lookup = dict(c.execute("SELECT supplier_name, terms_days FROM suppliers").fetchall())
         except Exception:
             terms_lookup = {}
-
+    
         today = datetime.now().date()
-
+    
         def compute_aging(row):
             sup = row['Supplier']
             terms = terms_lookup.get(sup, 30)
@@ -2639,21 +2642,21 @@ elif role == "Accounting":
                 bucket = "30+ Days"
                 
             return pd.Series([due_dt.strftime('%Y-%m-%d'), days_overdue, status, bucket])
-
+    
         if not pay_df.empty:
             pay_df[['Due Date', 'Days Overdue', 'Aging Status', 'Aging Bucket']] = pay_df.apply(compute_aging, axis=1)
-
+    
             m_curr = pay_df[pay_df['Aging Bucket'] == 'Current']['Total Amount'].sum()
             m_1_15 = pay_df[pay_df['Aging Bucket'] == '1-15 Days']['Total Amount'].sum()
             m_16_30 = pay_df[pay_df['Aging Bucket'] == '16-30 Days']['Total Amount'].sum()
             m_30_plus = pay_df[pay_df['Aging Bucket'] == '30+ Days']['Total Amount'].sum()
-
+    
             ac1, ac2, ac3, ac4 = st.columns(4)
             ac1.metric("🟢 Current (Not Due)", f"₱{m_curr:,.2f}")
             ac2.metric("🟡 1-15 Days Overdue", f"₱{m_1_15:,.2f}")
             ac3.metric("🟠 16-30 Days Overdue", f"₱{m_16_30:,.2f}")
             ac4.metric("🔴 30+ Days Overdue", f"₱{m_30_plus:,.2f}")
-
+    
             st.markdown("---")
             st.dataframe(
                 pay_df[['APV Number', 'PO Number', 'Supplier', 'Project', 'Total Amount', 'APV Date', 'Due Date', 'Aging Status']]
@@ -2661,17 +2664,66 @@ elif role == "Accounting":
                 use_container_width=True, 
                 hide_index=True
             )
-
-            st.markdown("---")
-            st.write("#### 💸 Process Payment & Generate Check Voucher")
+        else:
+            st.success("🎉 No outstanding vouchered payables waiting for payment!")
+    
+        st.markdown("---")
+        st.write("#### 💸 Process Payment & Generate Voucher")
+    
+        # Payment Basis Mode Switch
+        pay_basis = st.radio("Payment Mode:", ["Standard Payment (APV Basis)", "Advance PDC / Downpayment (PO Basis)"], horizontal=True)
+    
+        selected_apv_no = ""
+        selected_po_no = ""
+        supplier_name = ""
+        total_amt = 0.0
+        project_name = ""
+        debit_acct_code = ""
+        debit_acct_name = ""
+        is_selectable = False
+    
+        if pay_basis == "Standard Payment (APV Basis)":
+            unpaid_apvs = c.execute("""
+                SELECT apv_number, supplier, total_amount, project_name, pono 
+                FROM deliveries 
+                WHERE apv_number IS NOT NULL AND apv_number != '' AND (payment_status = 'Unpaid' OR payment_status IS NULL)
+            """).fetchall()
             
+            if unpaid_apvs:
+                apv_options = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in unpaid_apvs]
+                selected_apv_str = st.selectbox("Select APV Number to Pay", apv_options)
+                selected_apv_no = selected_apv_str.split(" - ")[0]
+                
+                row = [r for r in unpaid_apvs if r[0] == selected_apv_no][0]
+                supplier_name, total_amt, project_name, selected_po_no = row[1], float(row[2]), row[3], row[4]
+                debit_acct_code = "20100"
+                debit_acct_name = "Accounts Payable-Trade"
+                is_selectable = True
+            else:
+                st.info("No pending APVs available for payment.")
+        else:
+            unpaid_pos = c.execute("""
+                SELECT DISTINCT pono, supplier, total_amount, project_name 
+                FROM deliveries 
+                WHERE pono IS NOT NULL AND pono != '' AND (apv_number IS NULL OR apv_number = '') AND (cv_number IS NULL OR cv_number = '')
+            """).fetchall()
+            
+            if unpaid_pos:
+                po_options = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in unpaid_pos]
+                selected_po_str = st.selectbox("Select PO Number for Advance PDC", po_options)
+                selected_po_no = selected_po_str.split(" - ")[0]
+                
+                row = [r for r in unpaid_pos if r[0] == selected_po_no][0]
+                supplier_name, total_amt, project_name = row[1], float(row[2]), row[3]
+                debit_acct_code = "10500"
+                debit_acct_name = f"Advances to Suppliers - {supplier_name}"
+                is_selectable = True
+            else:
+                st.info("No open POs available for advance check issuance.")
+    
+        if is_selectable:
             col1, col2, col3 = st.columns(3)
-            
-            apv_options = pay_df.apply(lambda r: f"{r['APV Number']} - {r['Supplier']} (₱{r['Total Amount']:,.2f}) [{r['Aging Status']}]", axis=1).tolist()
-            selected_apv_str = col1.selectbox("Select APV Number to Pay", apv_options)
-            apv_to_pay = selected_apv_str.split(" - ")[0]
-            
-            pay_method = col2.selectbox("Payment Method", ["Check", "Cash"])
+            pay_method = col1.selectbox("Payment Method", ["Check", "Cash"])
             
             bank_accounts = [
                 ("10310", "Cash in Bank MBTC"),
@@ -2680,83 +2732,79 @@ elif role == "Accounting":
                 ("10340", "Cash in Bank Landbank"),
                 ("10100", "Cash on Hand")
             ]
-            
-            bank_choice = st.selectbox("Select Funding Cash/Bank Account", [f"[{b[0]}] {b[1]}" for b in bank_accounts])
+            bank_choice = col2.selectbox("Funding Cash/Bank Account", [f"[{b[0]}] {b[1]}" for b in bank_accounts])
             selected_bank_code = bank_choice.split("]")[0].replace("[", "")
             selected_bank_name = bank_choice.split("]")[1].strip()
             
             prefix = "CV" if pay_method == "Check" else "CAV"
-            suggested_cv = generate_voucher_number(c, "cv_number", prefix)
-            
-            cv_input = col3.text_input(
-                "Voucher Number Sequence", 
-                value=suggested_cv, 
-                key=f"cv_input_{prefix}_{suggested_cv}"
-            )
-            
+            try:
+                suggested_cv = generate_voucher_number(c, "cv_number", prefix)
+            except Exception:
+                try:
+                    suggested_cv = generate_voucher_number(prefix, conn=conn)
+                except Exception:
+                    suggested_cv = f"{prefix}-00001"
+    
+            cv_input = col3.text_input("Voucher Number Sequence", value=suggested_cv, key=f"cv_inp_{prefix}_{suggested_cv}")
+    
+            col_d1, col_d2 = st.columns(2)
+            cheque_no_input = col_d1.text_input("Cheque Number (Optional)", value="")
+            cheque_date_input = col_d2.date_input("Cheque Date (PDC Date)", value=datetime.now().date())
+    
             st.info(f"""
             💡 **Accounting Entry Preview:**
-            * **Debit:** Accounts Payable-Trade (Code 20100)
-            * **Credit:** {selected_bank_name} (Code {selected_bank_code})
+            * **Debit:** {debit_acct_name} (Code {debit_acct_code}) — ₱{total_amt:,.2f}
+            * **Credit:** {selected_bank_name} (Code {selected_bank_code}) — ₱{total_amt:,.2f}
             """)
-            
+    
             if st.button("✅ Process Payment & Issue Voucher", type="primary"):
                 if cv_input.strip():
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    selected_pay = pay_df[pay_df['APV Number'] == apv_to_pay].iloc[0]
-                    pay_amt = float(selected_pay['Total Amount'])
-                    po_no = selected_pay['PO Number']
-                    supplier_name = selected_pay['Supplier']
-                    proj_name = selected_pay['Project']
-                    
-                    po_details = c.execute("SELECT activity, Description FROM requests WHERE pono = ?", (po_no,)).fetchall()
-                    po_desc_string = ""
-                    
-                    if po_details:
-                        desc_parts = []
-                        for act, part in po_details:
-                            item_desc = " - ".join([str(x) for x in [act, part] if x])
-                            if item_desc:
-                                if len(item_desc) > 30:
-                                    item_desc = item_desc[:25] + "..."
-                                desc_parts.append(item_desc)
-                        if desc_parts:
-                            po_desc_string = " - " + " | ".join(desc_parts)
-                    
-                    cv_debit_desc = f"Settlement of APV #{apv_to_pay} ({supplier_name}){po_desc_string}"
-                    cv_credit_desc = f"Payment release via {pay_method}{po_desc_string}"
-                    
-                    c.execute("""
-                        UPDATE deliveries 
-                        SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?
-                        WHERE apv_number = ?
-                    """, (cv_input.strip(), current_time, pay_method, apv_to_pay))
-                    
-                    c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (po_no,))
-                    
+                    c_date_str = cheque_date_input.strftime("%Y-%m-%d")
+    
+                    # Build explicit description
+                    ref_ident = f"APV #{selected_apv_no}" if selected_apv_no else f"PO #{selected_po_no}"
+                    cv_debit_desc = f"Settlement of {ref_ident} ({supplier_name})"
+                    cv_credit_desc = f"Payment release via {pay_method} for {ref_ident}"
+    
+                    # 1. Update Deliveries / Requests table
+                    if selected_apv_no:
+                        c.execute("""
+                            UPDATE deliveries 
+                            SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
+                            WHERE apv_number = ?
+                        """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_apv_no))
+                        if selected_po_no:
+                            c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_po_no,))
+                    else:
+                        c.execute("""
+                            UPDATE deliveries 
+                            SET cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
+                            WHERE pono = ?
+                        """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
+    
+                    # 2. Post GL Entries
+                    # DEBIT ENTRY
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                        VALUES (?, ?, '20100', 'Accounts Payable-Trade', ?, 0.0, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), pay_amt, apv_to_pay, cv_debit_desc, proj_name))
-                    
+                        VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
+                    """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, selected_apv_no or selected_po_no, cv_debit_desc, project_name))
+    
+                    # CREDIT ENTRY
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, pay_amt, apv_to_pay, cv_credit_desc, proj_name))
-                    
+                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, selected_apv_no or selected_po_no, cv_credit_desc, project_name))
+    
                     conn.commit()
-                    st.success(f"🎉 Voucher {cv_input.strip()} completed! Payment cleared for APV #{apv_to_pay}.")
+                    st.success(f"🎉 Voucher {cv_input.strip()} completed successfully!")
                     st.rerun()
                 else:
-                    st.error("⚠️ Please enter a valid Check Voucher Number.")
-        else:
-            st.success("🎉 No outstanding vouchered payables waiting for payment!")
-
+                    st.error("⚠️ Please enter a valid Voucher Number.")
+    
         # --- PETTY CASH LIQUIDATION EXPANDER ---
         st.markdown("---")
         with st.expander("🧾 Process Petty Cash Liquidation / Direct Expense Reimbursement"):
-            # Auto-increment PCV number directly from journal_entries
             pcv_row = c.execute("SELECT MAX(voucher_no) FROM journal_entries WHERE voucher_no LIKE 'PCV-%'").fetchone()
             if pcv_row and pcv_row[0]:
                 try:
@@ -2766,15 +2814,11 @@ elif role == "Accounting":
                     suggested_pcv = "PCV-00001"
             else:
                 suggested_pcv = "PCV-00001"
-
+    
             with st.form("petty_cash_form", clear_on_submit=True):
                 pc_col1, pc_col2, pc_col3, pc_col4 = st.columns(4)
                 
-                pc_v_num_input = pc_col1.text_input(
-                    "Voucher Number", 
-                    value=suggested_pcv, 
-                    key=f"pcv_num_{suggested_pcv}"
-                )
+                pc_v_num_input = pc_col1.text_input("Voucher Number", value=suggested_pcv, key=f"pcv_num_{suggested_pcv}")
                 payee_name = pc_col2.text_input("Payee / Custodian Name")
                 or_number = pc_col3.text_input("OR / Receipt Ref Number")
                 
@@ -2818,8 +2862,8 @@ elif role == "Accounting":
                         st.rerun()
                     else:
                         st.error("⚠️ Payee Name, Voucher Number, and a valid Amount greater than 0 are required.")
-
-        # --- TAB 2: UPDATE CHEQUE DATE & NUMBER EXPANDER ---
+    
+        # --- UPDATE CHEQUE DATE & NUMBER EXPANDER ---
         st.markdown("---")
         with st.expander("✏️ Update Cheque Date / Cheque Number for Issued Vouchers"):
             issued_cv_rows = c.execute("""
@@ -2834,7 +2878,6 @@ elif role == "Accounting":
                 selected_cv_str = st.selectbox("Select Voucher to Update", cv_list)
                 target_cv_no = selected_cv_str.split(" - ")[0]
                 
-                # Retrieve current details
                 cur_row = [r for r in issued_cv_rows if r[0] == target_cv_no][0]
                 existing_cnum = cur_row[3] if cur_row[3] else ""
                 existing_cdate = cur_row[4] if cur_row[4] else ""
@@ -2842,7 +2885,6 @@ elif role == "Accounting":
                 col_u1, col_u2 = st.columns(2)
                 updated_cnum = col_u1.text_input("Cheque Number", value=existing_cnum, key=f"cnum_{target_cv_no}")
                 
-                # Checkbox allowing accounting to toggle whether the cheque is dated yet
                 has_date = col_u2.checkbox("Set Exact Cheque Date", value=bool(existing_cdate))
                 
                 if has_date:
@@ -2854,7 +2896,7 @@ elif role == "Accounting":
                     final_cdate_str = updated_cdate_input.strftime("%Y-%m-%d")
                 else:
                     final_cdate_str = ""
-
+    
                 if st.button("💾 Save Cheque Details", type="primary"):
                     c.execute("""
                         UPDATE deliveries 
@@ -2866,11 +2908,8 @@ elif role == "Accounting":
                     st.rerun()
             else:
                 st.info("No issued vouchers available to update.")
-                
-       
-
-        #============================================================
-        # --- TAB 2: ISSUED VOUCHERS LIST ---
+    
+        # --- ISSUED VOUCHERS LIST ---
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
         
@@ -2889,7 +2928,6 @@ elif role == "Accounting":
                 
                 col_btn1, col_btn2 = st.columns(2)
                 
-                # Button 1: Full Payment Voucher Sheet
                 voucher_pdf = create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=conn)
                 col_btn1.download_button(
                     label="📄 Print Payment Voucher PDF",
@@ -2899,7 +2937,6 @@ elif role == "Accounting":
                     key=f"print_pv_{cv_no}_{idx}"
                 )
                 
-                # Button 2: A4 Cheque Printing
                 cheque_pdf = create_cheque_pdf(supplier, total_amt, c_date)
                 col_btn2.download_button(
                     label="🎟️ Print Cheque (A4)",
@@ -2911,119 +2948,6 @@ elif role == "Accounting":
                 st.markdown("---")
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
-            #========================================================================
-
-    #================================================================================
-    st.subheader("💳 Process Payment & Issue Check Voucher")
-
-        #================================================================================
-            # Generate CV Number safely
-        try:
-            cv_num = generate_voucher_number("CV", conn=conn)
-        except TypeError:
-            cv_num = generate_voucher_number("CV")
-            
-        st.write(f"**Generated Check Voucher No:** `{cv_num}`")
-        #================================================================================
-
-# Toggle between Standard Payment vs Advance PDC
-pay_basis = st.radio("Payment Mode:", ["Standard Payment (APV)", "Advance PDC / Downpayment (PO Basis)"], horizontal=True)
-
-if pay_basis == "Standard Payment (APV)":
-    # --- 1. APV BASIS (POST-DELIVERY) ---
-    unpaid_apvs = c.execute("""
-        SELECT apv_number, supplier, total_amount, project_name 
-        FROM deliveries 
-        WHERE apv_number IS NOT NULL AND apv_number != '' AND (cv_number IS NULL OR cv_number = '')
-    """).fetchall()
-    
-    if unpaid_apvs:
-        apv_options = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in unpaid_apvs]
-        selected_apv = st.selectbox("Select APV Number to Pay", apv_options)
-        target_apv_no = selected_apv.split(" - ")[0]
-        
-        # Get details
-        row = [r for r in unpaid_apvs if r[0] == target_apv_no][0]
-        supplier_name, total_amt, project_name = row[1], row[2], row[3]
-        target_po_no = ""
-        
-        debit_acct_code = "20100"
-        debit_acct_name = f"Accounts Payable - {supplier_name}"
-    else:
-        st.info("No pending APVs available for payment.")
-        selected_apv = None
-
-else:
-    # --- 2. PO BASIS (ADVANCE PDC PRE-DELIVERY) ---
-    unpaid_pos = c.execute("""
-        SELECT DISTINCT pono, supplier, total_amount, project_name 
-        FROM deliveries 
-        WHERE pono IS NOT NULL AND pono != '' AND (apv_number IS NULL OR apv_number = '') AND (cv_number IS NULL OR cv_number = '')
-    """).fetchall()
-    
-    if unpaid_pos:
-        po_options = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in unpaid_pos]
-        selected_po = st.selectbox("Select PO Number for Advance PDC", po_options)
-        target_po_no = selected_po.split(" - ")[0]
-        
-        # Get details
-        row = [r for r in unpaid_pos if r[0] == target_po_no][0]
-        supplier_name, total_amt, project_name = row[1], row[2], row[3]
-        target_apv_no = ""
-        
-        debit_acct_code = "10500"
-        debit_acct_name = f"Advances to Suppliers - {supplier_name}"
-    else:
-        st.info("No open POs available for advance check issuance.")
-        selected_po = None
-
-# --- PROCESS ISSUANCE BUTTON ---
-if (pay_basis == "Standard Payment (APV)" and selected_apv) or (pay_basis == "Advance PDC / Downpayment (PO Basis)" and selected_po):
-    col_c1, col_c2 = st.columns(2)
-    bank_account = col_c1.selectbox("Funding Bank Account", ["10330 - Cash in Bank BDO", "10310 - Cash in Bank MBTC"])
-    bank_code = bank_account.split(" - ")[0]
-    
-    cv_num = generate_voucher_number("CV", conn)
-    st.write(f"**Generated Check Voucher No:** `{cv_num}`")
-    
-    col_d1, col_d2 = st.columns(2)
-    cheque_no_input = col_d1.text_input("Cheque Number (Optional)", value="")
-    cheque_date_input = col_d2.date_input("Cheque Date (PDC Date)", value=datetime.now().date())
-    
-    if st.button("🚀 Issue Check & Post GL Entry", type="primary"):
-        c_date_str = cheque_date_input.strftime("%Y-%m-%d")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 1. Update Deliveries Table
-        if target_apv_no:
-            c.execute("""
-                UPDATE deliveries 
-                SET cv_number = ?, cv_date = ?, cheque_no = ?, cheque_date = ?
-                WHERE apv_number = ?
-            """, (cv_num, now_str, cheque_no_input.strip(), c_date_str, target_apv_no))
-        else:
-            c.execute("""
-                UPDATE deliveries 
-                SET cv_number = ?, cv_date = ?, cheque_no = ?, cheque_date = ?
-                WHERE pono = ?
-            """, (cv_num, now_str, cheque_no_input.strip(), c_date_str, target_po_no))
-        
-        # 2. Post Double-Entry Journal Entries
-        # DEBIT: Accounts Payable OR Advances to Suppliers
-        c.execute("""
-            INSERT INTO journal_entries (doc_number, doc_date, account_code, account_name, debit, credit, project_name)
-            VALUES (?, ?, ?, ?, ?, 0.0, ?)
-        """, (cv_num, c_date_str, debit_acct_code, debit_acct_name, total_amt, project_name))
-        
-        # CREDIT: Cash in Bank
-        c.execute("""
-            INSERT INTO journal_entries (doc_number, doc_date, account_code, account_name, debit, credit, project_name)
-            VALUES (?, ?, ?, ?, 0.0, ?, ?)
-        """, (cv_num, c_date_str, bank_code, f"Cash in Bank ({bank_code})", total_amt, project_name))
-        
-        conn.commit()
-        st.success(f"🎉 Check Voucher {cv_num} successfully issued for {supplier_name}!")
-        st.rerun()
     #================================================================================
     
             
