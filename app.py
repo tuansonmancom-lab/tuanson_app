@@ -1154,7 +1154,7 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     date_x     = left_margin + (133 * mm)   # Column for Date
     date_y     = top_y - (4 * mm)           # Date Row
 
-    payee_x    = left_margin + (5 * mm)    # Column for Payee
+    payee_x    = left_margin + (6 * mm)    # Column for Payee
     payee_y    = top_y - (13 * mm)          # Payee Row
 
     amt_num_x  = left_margin + (127 * mm)   # Column for Numeric Amount
