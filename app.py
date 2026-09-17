@@ -2763,35 +2763,6 @@ elif role == "Accounting":
             st.info("No issued check or payment vouchers available for printing yet.")
             #========================================================================
             
-       # --- REPLACE THIS AT THE VERY BOTTOM OF TAB 2 (tab_payment) ---
-        st.markdown("---")
-        st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
-        
-        issued_cvs = c.execute("""
-            SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount 
-            FROM deliveries 
-            WHERE cv_number IS NOT NULL AND cv_number != ''
-            ORDER BY cv_date DESC
-        """).fetchall()
-        
-        if issued_cvs and HAS_REPORTLAB:
-            for idx, cv in enumerate(issued_cvs):
-                cv_no, cv_date, apv_no, supplier, pay_method, total_amt = cv
-                col_info, col_btn = st.columns([3, 1])
-                col_info.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
-                
-                # Notice conn=conn is passed here to fetch PO and Project details automatically!
-                pdf_bytes = create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=conn)
-                col_btn.download_button(
-                    label=f"🖨️ Print Payment Voucher",
-                    data=pdf_bytes,
-                    file_name=f"Payment_Voucher_{cv_no}.pdf",
-                    mime="application/pdf",
-                    key=f"print_cv_{cv_no}_{idx}"
-                )
-        else:
-            st.info("No issued check or payment vouchers available for printing yet.")
-
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
