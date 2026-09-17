@@ -1131,7 +1131,7 @@ def cheque_amount_to_words(amount):
     if cents > 0:
         return f"*** {words_str} & {cents:02d}/100 PESOS ONLY ***"
     return f"*** {words_str} PESOS ONLY ***"
-
+#===========================================================================
 import io
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch, mm
