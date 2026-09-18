@@ -2727,23 +2727,39 @@ elif role == "Accounting":
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
         
-        issued_cvs = c.execute("""
-            SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
-            FROM (
+        # 1. Fetch issued vouchers from deliveries (Standard APV payments)
+        del_cvs = []
+        try:
+            del_cvs = c.execute("""
                 SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
                 FROM deliveries 
                 WHERE cv_number IS NOT NULL AND cv_number != ''
-                
-                UNION ALL
-                
+            """).fetchall()
+        except Exception:
+            del_cvs = []
+    
+        # 2. Fetch issued vouchers from requests (Advance PDCs / PO payments)
+        req_cvs = []
+        try:
+            req_cvs = c.execute("""
                 SELECT cv_number, cv_date, '' AS apv_number, supplier, payment_method, SUM(amount) AS total_amount, cheque_no, cheque_date 
                 FROM requests 
-                WHERE cv_number IS NOT NULL AND cv_number != '' 
-                  AND (pono NOT IN (SELECT DISTINCT pono FROM deliveries WHERE cv_number IS NOT NULL AND cv_number != '') OR pono IS NULL)
+                WHERE cv_number IS NOT NULL AND cv_number != ''
                 GROUP BY cv_number, cv_date, supplier, payment_method, cheque_no, cheque_date
-            )
-            ORDER BY cv_date DESC
-        """).fetchall()
+            """).fetchall()
+        except Exception:
+            req_cvs = []
+    
+        # 3. Merge both lists and filter duplicates, sorting by cv_date descending
+        seen_cvs = set()
+        issued_cvs = []
+        for record in (del_cvs + req_cvs):
+            cv_no = record[0]
+            if cv_no and cv_no not in seen_cvs:
+                seen_cvs.add(cv_no)
+                issued_cvs.append(record)
+    
+        issued_cvs.sort(key=lambda x: str(x[1] or ''), reverse=True)
         
         if issued_cvs and HAS_REPORTLAB:
             for idx, cv in enumerate(issued_cvs):
