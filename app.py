@@ -2684,46 +2684,77 @@ elif role == "Accounting":
             * **Credit:** {selected_bank_name} (Code {selected_bank_code}) — ₱{total_amt:,.2f}
             """)
     
+            #====================
             if st.button("✅ Process Payment & Issue Voucher", type="primary"):
-                if cv_input.strip():
-                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    c_date_str = cheque_date_input.strftime("%Y-%m-%d")
-    
-                    ref_ident = f"APV #{selected_apv_no}" if selected_apv_no else f"PO #{selected_po_no}"
-                    cv_debit_desc = f"Settlement of {ref_ident} ({supplier_name})"
-                    cv_credit_desc = f"Payment release via {pay_method} for {ref_ident}"
-    
-                    if selected_apv_no:
-                        c.execute("""
-                            UPDATE deliveries 
-                            SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
-                            WHERE apv_number = ?
-                        """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_apv_no))
-                        if selected_po_no:
-                            c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_po_no,))
-                    else:
-                        c.execute("""
-                            UPDATE requests 
-                            SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
-                            WHERE pono = ?
-                        """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
-    
-                    c.execute("""
-                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                        VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, selected_apv_no or selected_po_no, cv_debit_desc, project_name))
-    
-                    c.execute("""
-                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                        VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, selected_apv_no or selected_po_no, cv_credit_desc, project_name))
-    
-                    conn.commit()
-                    st.success(f"🎉 Voucher {cv_input.strip()} completed successfully!")
-                    st.rerun()
-                else:
-                    st.error("⚠️ Please enter a valid Voucher Number.")
-    
+                    try:
+                        # 1. Clean the ID strings to isolate the exact PO/APV number from the dropdown text
+                        po_val = selected_po_no.split(" - ")[0].strip() if selected_po_no else ""
+                        apv_val = selected_apv_no.split(" - ")[0].strip() if selected_apv_no else ""
+
+                        # 2. Update Source Documents
+                        if pay_basis == "Standard Payment (APV Basis)" and apv_val:
+                            try:
+                                c.execute("""
+                                    UPDATE deliveries 
+                                    SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
+                                    WHERE apv_number = ?
+                                """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, apv_val))
+                            except Exception:
+                                # Fallback if extra cheque columns don't exist yet in deliveries
+                                c.execute("UPDATE deliveries SET payment_status = 'Paid', cv_number = ?, cv_date = ? WHERE apv_number = ?", 
+                                          (cv_input.strip(), current_time, apv_val))
+                                
+                            if po_val:
+                                c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (po_val,))
+                                
+                        elif pay_basis == "Advance PDC / Downpayment (PO Basis)" and po_val:
+                            try:
+                                c.execute("""
+                                    UPDATE requests 
+                                    SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
+                                    WHERE pono = ?
+                                """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, po_val))
+                            except Exception:
+                                # Fallback if extra cheque columns don't exist yet in requests
+                                c.execute("UPDATE requests SET payment_status = 'Paid', cv_number = ?, cv_date = ? WHERE pono = ?", 
+                                          (cv_input.strip(), current_time, po_val))
+
+                        # 3. Insert Journal Entries
+                        ref_doc = apv_val if pay_basis == "Standard Payment (APV Basis)" else po_val
+                        
+                        # Debit Entry
+                        try:
+                            c.execute("""
+                                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                                VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
+                            """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, ref_doc, cv_debit_desc, project_name))
+                        except Exception:
+                            # Fallback if journal_entries lacks ref_no or project_name columns
+                            c.execute("""
+                                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, description)
+                                VALUES (?, ?, ?, ?, ?, 0.0, ?)
+                            """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, cv_debit_desc))
+
+                        # Credit Entry
+                        try:
+                            c.execute("""
+                                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                                VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
+                            """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, ref_doc, cv_credit_desc, project_name))
+                        except Exception:
+                            c.execute("""
+                                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, description)
+                                VALUES (?, ?, ?, ?, 0.0, ?, ?)
+                            """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, cv_credit_desc))
+
+                        conn.commit()
+                        st.success(f"🎉 Payment processed successfully! Voucher {cv_input} recorded.")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        # This catches the exact DB error before Streamlit redacts it
+                        st.error(f"❌ Database Error: {e}")
+            #====================
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
         
