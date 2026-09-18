@@ -123,40 +123,45 @@ def amount_to_words(amount):
     cents_str = f"{cents:02d}/100"
     return f"PHILIPPINE PESO {words_str} AND {cents_str} ONLY"
 #===========================================================
-def generate_voucher_number(prefix="CV", conn=None):
-    """Generates sequential voucher numbers (e.g., CV-2026-0001)."""
-    import datetime
-    year = datetime.datetime.now().strftime("%Y")
+def generate_voucher_number(c, col_name, prefix):
+    """Generates a strictly unique voucher number across all accounting tables."""
+    numbers = []
     
-    # Use passed connection or fall back to global/new connection
-    active_conn = conn if conn is not None else (globals().get('conn') or get_db_connection())
-    c = active_conn.cursor()
-    
-    # Check current highest sequence for this prefix and year
-    pattern = f"{prefix}-{year}-%"
-    row = c.execute("""
-        SELECT doc_number FROM journal_entries 
-        WHERE doc_number LIKE ? 
-        ORDER BY id DESC LIMIT 1
-    """, (pattern,)).fetchone()
-    
-    if not row:
-        row = c.execute("""
-            SELECT cv_number FROM deliveries 
-            WHERE cv_number LIKE ? 
-            ORDER BY id DESC LIMIT 1
-        """, (pattern,)).fetchone()
+    # Check journal entries
+    try:
+        res = c.execute(f"SELECT voucher_no FROM journal_entries WHERE voucher_no LIKE '{prefix}-%'").fetchall()
+        for r in res:
+            try:
+                numbers.append(int(r[0].split('-')[-1]))
+            except Exception:
+                pass
+    except Exception:
+        pass
 
-    if row and row[0]:
-        try:
-            last_seq = int(str(row[0]).split("-")[-1])
-            new_seq = last_seq + 1
-        except ValueError:
-            new_seq = 1
-    else:
-        new_seq = 1
+    # Check deliveries
+    try:
+        res = c.execute(f"SELECT {col_name} FROM deliveries WHERE {col_name} LIKE '{prefix}-%'").fetchall()
+        for r in res:
+            try:
+                numbers.append(int(r[0].split('-')[-1]))
+            except Exception:
+                pass
+    except Exception:
+        pass
 
-    return f"{prefix}-{year}-{new_seq:04d}"
+    # Check requests
+    try:
+        res = c.execute(f"SELECT cv_number FROM requests WHERE cv_number LIKE '{prefix}-%'").fetchall()
+        for r in res:
+            try:
+                numbers.append(int(r[0].split('-')[-1]))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    next_num = max(numbers) + 1 if numbers else 1
+    return f"{prefix}-{next_num:05d}"
 #=================================================================    
 
 def get_income_statement(conn, start_date, end_date):
@@ -894,25 +899,21 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story = []
     styles = getSampleStyleSheet()
 
-    # --- Fetch Supplier Address Safely ---
+    # Fetch Supplier Location
     sup_location = "Cebu, Philippines"
     if conn:
         try:
             c = conn.cursor()
-            # FIX: Properly filter by supplier_name
             row = c.execute("SELECT location FROM suppliers WHERE supplier_name = ?", (supplier,)).fetchone()
             if row and row[0]:
                 sup_location = row[0]
         except Exception:
             pass
 
-    # --- Styles ---
     title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=16, leading=20, alignment=1)
     sub_title_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontSize=9, leading=12, alignment=1)
-    body_bold = ParagraphStyle('BodyBold', parent=styles['Normal'], fontSize=9, leading=11, fontName="Helvetica-Bold")
     body_norm = ParagraphStyle('BodyNorm', parent=styles['Normal'], fontSize=8, leading=10)
 
-    # --- Header ---
     story.append(Paragraph("<b>Tuanson Construction</b>", title_style))
     story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_title_style))
     story.append(Paragraph("Tel: - Fax: -", sub_title_style))
@@ -920,7 +921,6 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(Paragraph("<b>Payment Voucher</b>", title_style))
     story.append(Spacer(1, 10))
 
-    # --- Fetch Cheque / PO Details ---
     cheque_no_str = "-"
     cheque_date_str = "-"
     po_no_str = "-"
@@ -929,27 +929,35 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     if conn:
         try:
             c = conn.cursor()
-            if apv_no:
+            # If standard APV payment
+            if apv_no and apv_no.strip():
                 del_row = c.execute("""
                     SELECT cheque_no, cheque_date, pono, project_name 
-                    FROM deliveries WHERE apv_number = ?
-                """, (apv_no,)).fetchone()
+                    FROM deliveries WHERE apv_number = ? AND supplier = ?
+                """, (apv_no, supplier)).fetchone()
                 if del_row:
                     cheque_no_str = del_row[0] or "-"
                     cheque_date_str = del_row[1] or "-"
                     po_no_str = del_row[2] or "-"
                     project_str = del_row[3] or "-"
+            # If Advance PDC (PO Basis)
+            else:
+                req_row = c.execute("""
+                    SELECT cheque_no, cheque_date, pono, project_name 
+                    FROM requests WHERE cv_number = ? AND supplier = ?
+                """, (cv_no, supplier)).fetchone()
+                if req_row:
+                    cheque_no_str = req_row[0] or "-"
+                    cheque_date_str = req_row[1] or "-"
+                    po_no_str = req_row[2] or "-"
+                    project_str = req_row[3] or "-"
         except Exception:
             pass
 
-    # --- Supplier & Meta Box (FIXED) ---
-    # Only render the passed supplier name and location
     supplier_box_html = f"<b>{supplier}</b><br/>{sup_location}"
     meta_box_html = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {cv_date}<br/><b>CHEQUE NO.:</b> {cheque_no_str} / {cheque_date_str}"
 
-    header_table_data = [
-        [Paragraph(supplier_box_html, body_norm), Paragraph(meta_box_html, body_norm)]
-    ]
+    header_table_data = [[Paragraph(supplier_box_html, body_norm), Paragraph(meta_box_html, body_norm)]]
     t_header = Table(header_table_data, colWidths=[340, 200])
     t_header.setStyle(TableStyle([
         ('BOX', (0,0), (-1,-1), 1, colors.black),
@@ -963,14 +971,16 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(t_header)
     story.append(Spacer(1, 10))
 
-    # --- Particulars Table ---
-    apv_ref = f"APV#{apv_no}" if apv_no else "Direct Payment"
+    apv_ref = f"APV#{apv_no}" if apv_no else "Advance Downpayment"
     po_ref = f"(PO#{po_no_str})" if po_no_str != "-" else ""
     desc_text = f"Payment for materials / services ({apv_ref}) {po_ref} for {project_str}".strip()
 
+    acct_code = "20100" if apv_no else "10500"
+    acct_name = supplier if apv_no else f"Advances to Suppliers - {supplier}"
+
     part_data = [
         [Paragraph("<b>A/C CODE</b>", body_norm), Paragraph("<b>A/C NAME</b>", body_norm), Paragraph("<b>DESCRIPTION</b>", body_norm), Paragraph("<b>AMOUNT</b>", body_norm)],
-        [Paragraph("20100", body_norm), Paragraph(supplier, body_norm), Paragraph(desc_text, body_norm), Paragraph(f"₱{total_amt:,.2f}", body_norm)]
+        [Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(desc_text, body_norm), Paragraph(f"₱{total_amt:,.2f}", body_norm)]
     ]
     t_part = Table(part_data, colWidths=[70, 150, 230, 90])
     t_part.setStyle(TableStyle([
@@ -984,13 +994,12 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(t_part)
     story.append(Spacer(1, 10))
 
-    # --- Journals Table ---
     story.append(Paragraph("<b>Journals:</b>", body_norm))
     story.append(Spacer(1, 3))
     
     j_data = [
         [Paragraph("<b>Doc No.</b>", body_norm), Paragraph("<b>Date</b>", body_norm), Paragraph("<b>Account #</b>", body_norm), Paragraph("<b>Account Name</b>", body_norm), Paragraph("<b>Debit</b>", body_norm), Paragraph("<b>Credit</b>", body_norm)],
-        [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph("20100", body_norm), Paragraph(f"Accounts Payable - {supplier}", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph("", body_norm)],
+        [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph("", body_norm)],
         [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph("10330", body_norm), Paragraph("10330: Cash in Bank BDO", body_norm), Paragraph("", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm)],
         [Paragraph("", body_norm), Paragraph("", body_norm), Paragraph("", body_norm), Paragraph("<b>TOTAL</b>", body_norm), Paragraph(f"<b>{total_amt:,.2f}</b>", body_norm), Paragraph(f"<b>{total_amt:,.2f}</b>", body_norm)]
     ]
@@ -1006,7 +1015,6 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(t_j)
     story.append(Spacer(1, 10))
 
-    # --- Outstanding/Doc Details ---
     doc_data = [
         [Paragraph("<b>Type</b>", body_norm), Paragraph("<b>Doc. No.</b>", body_norm), Paragraph("<b>Doc. Date</b>", body_norm), Paragraph("<b>Description</b>", body_norm), Paragraph("<b>Orig. Amount</b>", body_norm), Paragraph("<b>Paid Amount</b>", body_norm)],
         [Paragraph("BIL", body_norm), Paragraph(f"PO#{po_no_str}", body_norm), Paragraph(cv_date, body_norm), Paragraph(f"PAYABLE FOR MATERIALS FOR \"{project_str.upper()}\"", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm)]
@@ -1023,8 +1031,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(t_doc)
     story.append(Spacer(1, 10))
 
-    # --- Amount in Words ---
-    amt_words = f"PHILIPPINE PESO {total_amt:,.2f}" # Replace with inflect/num2words if imported
+    amt_words = f"PHILIPPINE PESO {total_amt:,.2f}"
     words_data = [
         [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm), 
          Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f}<br/>ROUNDING ADJ: 0.00<br/><b>NET TOTAL PHP: ₱{total_amt:,.2f}</b>", ParagraphStyle('RAlign', parent=body_norm, alignment=2))]
@@ -1039,7 +1046,6 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(t_words)
     story.append(Spacer(1, 40))
 
-    # --- Signatures ---
     sig_data = [
         [Paragraph("____________________________________<br/><b>APPROVED BY</b>", ParagraphStyle('C1', parent=body_norm, alignment=1)),
          Paragraph("____________________________________<br/><b>RECEIVED BY</b>", ParagraphStyle('C2', parent=body_norm, alignment=1))]
@@ -2626,24 +2632,14 @@ elif role == "Accounting":
             else:
                 st.info("No pending APVs available for payment.")
         else:
-            # FIXED: Corrected column names to `amount` from `requests` table
-            try:
-                unpaid_pos = c.execute("""
-                    SELECT pono, supplier, SUM(amount) AS total_amount, project_name 
-                    FROM requests 
-                    WHERE pono IS NOT NULL AND pono != '' 
-                      AND LOWER(COALESCE(status, '')) LIKE '%approved%'
-                      AND (payment_status IS NULL OR payment_status = '' OR LOWER(payment_status) = 'unpaid')
-                    GROUP BY pono, supplier, project_name
-                """).fetchall()
-            except Exception:
-                unpaid_pos = c.execute("""
-                    SELECT pono, supplier, amount AS total_amount, project_name 
-                    FROM requests 
-                    WHERE pono IS NOT NULL AND pono != '' 
-                      AND LOWER(COALESCE(status, '')) LIKE '%approved%'
-                      AND (payment_status IS NULL OR payment_status = '' OR LOWER(payment_status) = 'unpaid')
-                """).fetchall()
+            unpaid_pos = c.execute("""
+                SELECT pono, supplier, SUM(amount) AS total_amount, project_name 
+                FROM requests 
+                WHERE pono IS NOT NULL AND pono != '' 
+                  AND LOWER(COALESCE(status, '')) LIKE '%approved%'
+                  AND (payment_status IS NULL OR payment_status = '' OR LOWER(payment_status) = 'unpaid')
+                GROUP BY pono, supplier, project_name
+            """).fetchall()
             
             if unpaid_pos:
                 po_options = [f"{r[0]} - {r[1]} (₱{float(r[2] or 0):,.2f})" for r in unpaid_pos]
@@ -2674,13 +2670,7 @@ elif role == "Accounting":
             selected_bank_name = bank_choice.split("]")[1].strip()
             
             prefix = "CV" if pay_method == "Check" else "CAV"
-            try:
-                suggested_cv = generate_voucher_number(c, "cv_number", prefix)
-            except Exception:
-                try:
-                    suggested_cv = generate_voucher_number(prefix, conn=conn)
-                except Exception:
-                    suggested_cv = f"{prefix}-00001"
+            suggested_cv = generate_voucher_number(c, "cv_number", prefix)
     
             cv_input = col3.text_input("Voucher Number Sequence", value=suggested_cv, key=f"cv_inp_{prefix}_{suggested_cv}")
     
@@ -2712,23 +2702,11 @@ elif role == "Accounting":
                         if selected_po_no:
                             c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_po_no,))
                     else:
-                        try:
-                            c.execute("""
-                                UPDATE requests 
-                                SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
-                                WHERE pono = ?
-                            """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
-                        except Exception:
-                            c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_po_no,))
-                        
-                        try:
-                            c.execute("""
-                                UPDATE deliveries 
-                                SET cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?, payment_status = 'Paid'
-                                WHERE pono = ?
-                            """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
-                        except Exception:
-                            pass
+                        c.execute("""
+                            UPDATE requests 
+                            SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
+                            WHERE pono = ?
+                        """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
     
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
@@ -2747,137 +2725,25 @@ elif role == "Accounting":
                     st.error("⚠️ Please enter a valid Voucher Number.")
     
         st.markdown("---")
-        with st.expander("🧾 Process Petty Cash Liquidation / Direct Expense Reimbursement"):
-            pcv_row = c.execute("SELECT MAX(voucher_no) FROM journal_entries WHERE voucher_no LIKE 'PCV-%'").fetchone()
-            if pcv_row and pcv_row[0]:
-                try:
-                    last_num = int(pcv_row[0].split('-')[-1])
-                    suggested_pcv = f"PCV-{(last_num + 1):05d}"
-                except ValueError:
-                    suggested_pcv = "PCV-00001"
-            else:
-                suggested_pcv = "PCV-00001"
-    
-            with st.form("petty_cash_form", clear_on_submit=True):
-                pc_col1, pc_col2, pc_col3, pc_col4 = st.columns(4)
-                
-                pc_v_num_input = pc_col1.text_input("Voucher Number", value=suggested_pcv, key=f"pcv_num_{suggested_pcv}")
-                payee_name = pc_col2.text_input("Payee / Custodian Name")
-                or_number = pc_col3.text_input("OR / Receipt Ref Number")
-                
-                projects_query = c.execute("SELECT DISTINCT project_name FROM deliveries WHERE project_name IS NOT NULL AND project_name != ''").fetchall()
-                project_options = [p[0] for p in projects_query] if projects_query else ["General Head Office"]
-                pc_project = pc_col4.selectbox("Project Site Tagging", project_options)
-                
-                pc_col5, pc_col6 = st.columns(2)
-                pc_amount = pc_col5.number_input("Liquidation Amount (₱)", min_value=0.0, step=100.0, format="%.2f")
-                
-                exp_accounts = c.execute("SELECT account_code, account_name FROM chart_of_accounts WHERE account_type = 'Expense'").fetchall()
-                exp_opts = [f"[{acc[0]}] {acc[1]}" for acc in exp_accounts] if exp_accounts else ["60200 - Direct Cost Materials"]
-                pc_expense_account = pc_col6.selectbox("Expense Category (Debit)", exp_opts)
-                
-                pc_desc = st.text_area("Particulars / Purpose of Expense", height=70)
-                
-                submit_pc = st.form_submit_button("⚡ Post Petty Cash Liquidation", type="primary")
-                if submit_pc:
-                    if payee_name.strip() and pc_amount > 0 and pc_v_num_input.strip():
-                        cur_dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        
-                        e_code = pc_expense_account.split("]")[0].replace("[", "")
-                        e_name = pc_expense_account.split("]")[1].strip()
-                        
-                        desc_full = f"Petty Cash: {pc_desc.strip()} (Payee: {payee_name}, OR: {or_number}, Site: {pc_project})"
-                        
-                        c.execute("""
-                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                            VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
-                        """, (cur_dt, pc_v_num_input.strip(), e_code, e_name, pc_amount, or_number, desc_full, pc_project))
-                        
-                        c.execute("""
-                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                            VALUES (?, ?, '10100', 'Cash on Hand', 0.0, ?, ?, ?, ?)
-                        """, (cur_dt, pc_v_num_input.strip(), pc_amount, or_number, desc_full, pc_project))
-                        
-                        conn.commit()
-                        st.success(f"🎉 Petty Cash Voucher {pc_v_num_input.strip()} posted successfully for ₱{pc_amount:,.2f}!")
-                        st.rerun()
-                    else:
-                        st.error("⚠️ Payee Name, Voucher Number, and a valid Amount greater than 0 are required.")
-    
-        st.markdown("---")
-        with st.expander("✏️ Update Cheque Date / Cheque Number for Issued Vouchers"):
-            issued_cv_rows = c.execute("""
-                SELECT cv_number, supplier, total_amount, cheque_no, cheque_date 
-                FROM deliveries 
-                WHERE cv_number IS NOT NULL AND cv_number != ''
-                ORDER BY cv_date DESC
-            """).fetchall()
-            
-            if issued_cv_rows:
-                cv_list = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in issued_cv_rows]
-                selected_cv_str = st.selectbox("Select Voucher to Update", cv_list)
-                target_cv_no = selected_cv_str.split(" - ")[0]
-                
-                cur_row = [r for r in issued_cv_rows if r[0] == target_cv_no][0]
-                existing_cnum = cur_row[3] if cur_row[3] else ""
-                existing_cdate = cur_row[4] if cur_row[4] else ""
-                
-                col_u1, col_u2 = st.columns(2)
-                updated_cnum = col_u1.text_input("Cheque Number", value=existing_cnum, key=f"cnum_{target_cv_no}")
-                
-                has_date = col_u2.checkbox("Set Exact Cheque Date", value=bool(existing_cdate))
-                
-                if has_date:
-                    try:
-                        default_dt = datetime.strptime(existing_cdate, "%Y-%m-%d").date()
-                    except Exception:
-                        default_dt = datetime.now().date()
-                    updated_cdate_input = col_u2.date_input("Cheque Date", value=default_dt)
-                    final_cdate_str = updated_cdate_input.strftime("%Y-%m-%d")
-                else:
-                    final_cdate_str = ""
-    
-                if st.button("💾 Save Cheque Details", type="primary"):
-                    c.execute("""
-                        UPDATE deliveries 
-                        SET cheque_no = ?, cheque_date = ? 
-                        WHERE cv_number = ?
-                    """, (updated_cnum.strip(), final_cdate_str, target_cv_no))
-                    conn.commit()
-                    st.success(f"🎉 Cheque details updated for {target_cv_no}!")
-                    st.rerun()
-            else:
-                st.info("No issued vouchers available to update.")
-    
-        st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
         
-        # FIXED: Corrected `SUM(amount)` for `requests` in UNION query
-        try:
-            issued_cvs = c.execute("""
-                SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
-                FROM (
-                    SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
-                    FROM deliveries 
-                    WHERE cv_number IS NOT NULL AND cv_number != ''
-                    
-                    UNION ALL
-                    
-                    SELECT cv_number, cv_date, '' AS apv_number, supplier, payment_method, SUM(amount) AS total_amount, cheque_no, cheque_date 
-                    FROM requests 
-                    WHERE cv_number IS NOT NULL AND cv_number != '' 
-                      AND pono NOT IN (SELECT DISTINCT pono FROM deliveries WHERE cv_number IS NOT NULL AND cv_number != '')
-                    GROUP BY cv_number, cv_date, supplier, payment_method, cheque_no, cheque_date
-                )
-                ORDER BY cv_date DESC
-            """).fetchall()
-        except Exception:
-            issued_cvs = c.execute("""
+        issued_cvs = c.execute("""
+            SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
+            FROM (
                 SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
                 FROM deliveries 
                 WHERE cv_number IS NOT NULL AND cv_number != ''
-                ORDER BY cv_date DESC
-            """).fetchall()
+                
+                UNION ALL
+                
+                SELECT cv_number, cv_date, '' AS apv_number, supplier, payment_method, SUM(amount) AS total_amount, cheque_no, cheque_date 
+                FROM requests 
+                WHERE cv_number IS NOT NULL AND cv_number != '' 
+                  AND (pono NOT IN (SELECT DISTINCT pono FROM deliveries WHERE cv_number IS NOT NULL AND cv_number != '') OR pono IS NULL)
+                GROUP BY cv_number, cv_date, supplier, payment_method, cheque_no, cheque_date
+            )
+            ORDER BY cv_date DESC
+        """).fetchall()
         
         if issued_cvs and HAS_REPORTLAB:
             for idx, cv in enumerate(issued_cvs):
@@ -2906,7 +2772,8 @@ elif role == "Accounting":
                 )
                 st.markdown("---")
         else:
-            st.info("No issued check or payment vouchers available for printing yet.")        
+            st.info("No issued check or payment vouchers available for printing yet.")
+   
     
         # --- TAB 3: GENERAL LEDGER ---
         with tab_gl:
