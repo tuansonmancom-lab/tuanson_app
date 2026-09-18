@@ -2706,10 +2706,10 @@ with tab_payment:
         else:
             st.info("No pending APVs available for payment.")
     else:
-        # FIX: Query requests table directly for Approved POs prior to delivery receiving
+        # FIXED: Corrected column names to `amount` from `requests` table
         try:
             unpaid_pos = c.execute("""
-                SELECT pono, supplier, SUM(total_price) AS total_amount, project_name 
+                SELECT pono, supplier, SUM(amount) AS total_amount, project_name 
                 FROM requests 
                 WHERE pono IS NOT NULL AND pono != '' 
                   AND LOWER(COALESCE(status, '')) LIKE '%approved%'
@@ -2718,7 +2718,7 @@ with tab_payment:
             """).fetchall()
         except Exception:
             unpaid_pos = c.execute("""
-                SELECT DISTINCT pono, supplier, COALESCE(total_amount, 0), project_name 
+                SELECT pono, supplier, amount AS total_amount, project_name 
                 FROM requests 
                 WHERE pono IS NOT NULL AND pono != '' 
                   AND LOWER(COALESCE(status, '')) LIKE '%approved%'
@@ -2736,7 +2736,7 @@ with tab_payment:
             debit_acct_name = f"Advances to Suppliers - {supplier_name}"
             is_selectable = True
         else:
-            st.info("No open POs available for advance check issuance.")
+            st.info("No open Approved POs available for advance check issuance.")
 
     if is_selectable:
         col1, col2, col3 = st.columns(3)
@@ -2792,20 +2792,24 @@ with tab_payment:
                     if selected_po_no:
                         c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_po_no,))
                 else:
-                    # FIX: Auto-ensure voucher columns exist on requests table and tag as Paid / PDC Issued
-                    for col_name in ['cv_number', 'cv_date', 'payment_method', 'cheque_no', 'cheque_date']:
-                        try:
-                            c.execute(f"ALTER TABLE requests ADD COLUMN {col_name} TEXT")
-                        except Exception:
-                            pass
+                    try:
+                        c.execute("""
+                            UPDATE requests 
+                            SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
+                            WHERE pono = ?
+                        """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
+                    except Exception:
+                        c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (selected_po_no,))
                     
-                    c.execute("""
-                        UPDATE requests 
-                        SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
-                        WHERE pono = ?
-                    """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
+                    try:
+                        c.execute("""
+                            UPDATE deliveries 
+                            SET cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?, payment_status = 'Paid'
+                            WHERE pono = ?
+                        """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, selected_po_no))
+                    except Exception:
+                        pass
 
-                # Post Journal Entries
                 c.execute("""
                     INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                     VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
@@ -2882,26 +2886,12 @@ with tab_payment:
 
     st.markdown("---")
     with st.expander("✏️ Update Cheque Date / Cheque Number for Issued Vouchers"):
-        # FIX: Union query to cover both standard APV vouchers and Advance PDC vouchers
-        try:
-            issued_cv_rows = c.execute("""
-                SELECT cv_number, supplier, total_amount, cheque_no, cheque_date 
-                FROM deliveries 
-                WHERE cv_number IS NOT NULL AND cv_number != ''
-                UNION ALL
-                SELECT cv_number, supplier, SUM(total_price) as total_amount, cheque_no, cheque_date
-                FROM requests 
-                WHERE cv_number IS NOT NULL AND cv_number != ''
-                GROUP BY cv_number, supplier, cheque_no, cheque_date
-                ORDER BY cv_number DESC
-            """).fetchall()
-        except Exception:
-            issued_cv_rows = c.execute("""
-                SELECT cv_number, supplier, total_amount, cheque_no, cheque_date 
-                FROM deliveries 
-                WHERE cv_number IS NOT NULL AND cv_number != ''
-                ORDER BY cv_date DESC
-            """).fetchall()
+        issued_cv_rows = c.execute("""
+            SELECT cv_number, supplier, total_amount, cheque_no, cheque_date 
+            FROM deliveries 
+            WHERE cv_number IS NOT NULL AND cv_number != ''
+            ORDER BY cv_date DESC
+        """).fetchall()
         
         if issued_cv_rows:
             cv_list = [f"{r[0]} - {r[1]} (₱{r[2]:,.2f})" for r in issued_cv_rows]
@@ -2933,16 +2923,6 @@ with tab_payment:
                     SET cheque_no = ?, cheque_date = ? 
                     WHERE cv_number = ?
                 """, (updated_cnum.strip(), final_cdate_str, target_cv_no))
-                
-                try:
-                    c.execute("""
-                        UPDATE requests 
-                        SET cheque_no = ?, cheque_date = ? 
-                        WHERE cv_number = ?
-                    """, (updated_cnum.strip(), final_cdate_str, target_cv_no))
-                except Exception:
-                    pass
-
                 conn.commit()
                 st.success(f"🎉 Cheque details updated for {target_cv_no}!")
                 st.rerun()
@@ -2952,17 +2932,23 @@ with tab_payment:
     st.markdown("---")
     st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
     
-    # FIX: Query both deliveries and requests so Advance PDC vouchers appear in the printable list
+    # FIXED: Corrected `SUM(amount)` for `requests` in UNION query
     try:
         issued_cvs = c.execute("""
-            SELECT cv_number, cv_date, COALESCE(apv_number, ''), supplier, payment_method, total_amount, cheque_no, cheque_date 
-            FROM deliveries 
-            WHERE cv_number IS NOT NULL AND cv_number != ''
-            UNION ALL
-            SELECT cv_number, cv_date, '' AS apv_number, supplier, payment_method, SUM(total_price) AS total_amount, cheque_no, cheque_date 
-            FROM requests 
-            WHERE cv_number IS NOT NULL AND cv_number != ''
-            GROUP BY cv_number, cv_date, supplier, payment_method, cheque_no, cheque_date
+            SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
+            FROM (
+                SELECT cv_number, cv_date, apv_number, supplier, payment_method, total_amount, cheque_no, cheque_date 
+                FROM deliveries 
+                WHERE cv_number IS NOT NULL AND cv_number != ''
+                
+                UNION ALL
+                
+                SELECT cv_number, cv_date, '' AS apv_number, supplier, payment_method, SUM(amount) AS total_amount, cheque_no, cheque_date 
+                FROM requests 
+                WHERE cv_number IS NOT NULL AND cv_number != '' 
+                  AND pono NOT IN (SELECT DISTINCT pono FROM deliveries WHERE cv_number IS NOT NULL AND cv_number != '')
+                GROUP BY cv_number, cv_date, supplier, payment_method, cheque_no, cheque_date
+            )
             ORDER BY cv_date DESC
         """).fetchall()
     except Exception:
