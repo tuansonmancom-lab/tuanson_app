@@ -3334,3 +3334,31 @@ elif role == "Admin View All":
             file_name=f"accounts_payable_report_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
+    #================================================================
+    st.markdown("---")
+    with st.expander("🚨 ADMIN TOOL: Complete Operational Reset"):
+        st.error("⚠️ **WARNING:** This will permanently delete all requests, deliveries, inventory transactions, and journal entries!")
+        
+        confirm_wipe = st.checkbox("I understand this will reset all operational data back to zero.")
+        
+        if confirm_wipe:
+            if st.button("🔥 WIPE ALL OPERATIONAL DATA & RESET IDs", type="primary"):
+                try:
+                    # Clear operational transaction tables
+                    c.execute("DELETE FROM journal_entries")
+                    c.execute("DELETE FROM deliveries")
+                    c.execute("DELETE FROM inventory_ledger")
+                    c.execute("DELETE FROM requests")
+                    
+                    # Reset SQLite auto-increment counters back to 1
+                    c.execute("""
+                        DELETE FROM sqlite_sequence 
+                        WHERE name IN ('journal_entries', 'deliveries', 'inventory_ledger', 'requests')
+                    """)
+                    
+                    conn.commit()
+                    st.success("🎉 All operational tables cleared and ID sequences reset to 1!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error during database reset: {e}")
+    #================================================================
