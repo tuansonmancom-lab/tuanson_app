@@ -1703,6 +1703,7 @@ if role == "Requisitor":
             else:
                 st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
                     
+#=================================================================================
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
     st.subheader("🛒 Purchaser Dashboard")
@@ -1832,68 +1833,17 @@ elif role == "Purchaser":
                         conn.commit()
                         st.success(f"Successfully created P.O. #{po_number} with {len(selected_items)} item(s)!")
                         st.rerun()
-                        
 
-    st.subheader("⚠️ Rejected Purchase Orders (Action Required)")
-
-    # Fetch rejected POs and include the new rejection_reason column
-    rejected_pos = c.execute("""
-        SELECT pono, supplier, project_name, rejection_reason
-        FROM requests 
-        WHERE status = 'Rejected' AND pono IS NOT NULL AND pono != ''
-        GROUP BY pono
-    """).fetchall()
-
-    if not rejected_pos:
-        st.info("No rejected Purchase Orders at this time.")
-    else:
-        for po in rejected_pos:
-            pono, supplier, proj, reason = po
-            
-            with st.expander(f"❌ PO #{pono} | {supplier} | Needs Revision", expanded=True):
-                # Display the reason you typed in earlier!
-                st.error(f"**Rejection Reason:** {reason}") 
-                
-                # Fetch items. We include 'rowid' so we can update specific rows safely.
-                po_items_df = pd.read_sql_query(
-                    "SELECT rowid, item_no, description, qty, unit, price, amount FROM requests WHERE pono = ? AND status = 'Rejected'", 
-                    conn, params=(pono,)
-                )
-                
-                st.write("Update the unit price(s) below:")
-
-                # st.data_editor lets the Purchaser edit the table directly on the screen
-                edited_df = st.data_editor(
-                    po_items_df, 
-                    disabled=["rowid", "item_no", "description", "qty", "unit", "amount"], # Lock everything except 'price'
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={"id": None}, # Hides the ID column from the user interface
-                    key=f"edit_price_{pono}"
-                )
-                
-                if st.button("💾 Save Prices & Resubmit PO", key=f"resubmit_{pono}", type="primary"):
-                    # Loop through the edited dataframe and update the database
-                    for index, row in edited_df.iterrows():
-                        new_price = float(row['price'])
-                        new_amount = float(row['qty']) * new_price 
-                        row_id = row['id'] # <-- Changed from 'rowid' to 'id'
-                        
-                        c.execute("""
-                            UPDATE requests
-                            SET price = ?, amount = ?, status = 'Pending Approval', rejection_reason = NULL
-                            WHERE rowid = ?
-                        """, (new_price, new_amount, row_id))
-                    
-                    conn.commit()
-                    st.success(f"PO #{pono} resubmitted successfully!")
-                    import time
-                    time.sleep(1)
-                    st.rerun()
-    
     with tab_receive:
         st.write("### 🚚 Record Supplier Deliveries")
-        st.info("Log items that have arrived on-site and upload attached Delivery Receipts (DR), Sales Invoices (SI), or Official Receipts (OR).")
+        st.info("Log items that have arrived on-site (full or partial delivery) and upload attached Delivery Receipts (DR), Sales Invoices (SI), or Official Receipts (OR).")
+
+        # Database migration safeguard: ensures received_qty column exists
+        try:
+            c.execute("ALTER TABLE requests ADD COLUMN received_qty REAL DEFAULT 0.0")
+            conn.commit()
+        except Exception:
+            pass
 
         if st.button("🔄 Refresh Deliveries", key="btn_refresh_receive_deliveries"):
             st.rerun()
@@ -1901,22 +1851,26 @@ elif role == "Purchaser":
         if "receive_success_msg" in st.session_state:
             st.success(st.session_state.pop("receive_success_msg"))
 
+        # Fetch POs that have undelivered remaining quantities
         pending_recv_df = pd.read_sql_query("""
             SELECT 
                 pono AS 'PO Number', 
                 supplier AS 'Supplier', 
                 project_name AS 'Project', 
-                SUM(amount) AS 'Total Amount', 
+                SUM(price * (qty - COALESCE(received_qty, 0))) AS 'Unreceived Value', 
                 approved_timestamp AS 'Date Approved'
             FROM requests
-            WHERE status = 'Approved / Ongoing' AND received_status = 'Pending'
+            WHERE status = 'Approved / Ongoing' 
+              AND (received_status IS NULL OR received_status != 'Received')
+              AND (qty - COALESCE(received_qty, 0)) > 0
+              AND pono IS NOT NULL AND pono != ''
             GROUP BY pono
             ORDER BY approved_timestamp ASC
         """, conn)
         
         if not pending_recv_df.empty:
             st.dataframe(
-                pending_recv_df.style.format({"Total Amount": "₱{:,.2f}"}), 
+                pending_recv_df.style.format({"Unreceived Value": "₱{:,.2f}"}), 
                 use_container_width=True, 
                 hide_index=True
             )
@@ -1932,9 +1886,50 @@ elif role == "Purchaser":
             doc_prefix = sub_col1.selectbox("Type", ["DR", "CSI", "SI", "OR"], key="doc_type_prefix")
             raw_doc_no = sub_col2.text_input("Document No.", placeholder="e.g. 00001", key="doc_num_raw")
             
-            # Automatically combine them (e.g., "DR#00001")
             dr_number = f"{doc_prefix}#{raw_doc_no}" if raw_doc_no else ""
             
+            # Fetch line items for the selected PO to handle partial delivery quantities
+            po_items = c.execute("""
+                SELECT id, item_no, description, qty, COALESCE(received_qty, 0), price, unit 
+                FROM requests 
+                WHERE pono = ? AND status = 'Approved / Ongoing'
+            """, (po_to_receive,)).fetchall()
+
+            st.write("##### 📦 Specify Quantities Delivered Today")
+            
+            received_inputs = {}
+            total_delivery_amount = 0.0
+
+            for req_id, item_no, desc, ordered_qty, prev_rec, price, unit in po_items:
+                rem_qty = max(0.0, float(ordered_qty) - float(prev_rec))
+                if rem_qty <= 0:
+                    continue
+
+                c1, c2, c3 = st.columns([3, 2, 2])
+                c1.markdown(f"**{desc}**\n*(Unit: {unit} | Price: ₱{price:,.2f})*")
+                c2.caption(f"Ordered: `{ordered_qty:,.0f}` | Prev Rec: `{prev_rec:,.0f}`\n**Remaining: {rem_qty:,.0f}**")
+                
+                qty_today = c3.number_input(
+                    "Qty Received Today",
+                    min_value=0.0,
+                    max_value=float(rem_qty),
+                    value=float(rem_qty),
+                    step=1.0,
+                    key=f"recv_qty_{po_to_receive}_{req_id}"
+                )
+                
+                item_total = qty_today * float(price)
+                total_delivery_amount += item_total
+                received_inputs[req_id] = {
+                    "desc": desc,
+                    "qty_today": qty_today,
+                    "prev_rec": prev_rec,
+                    "ordered_qty": ordered_qty,
+                    "price": price
+                }
+
+            st.markdown(f"#### 💵 Delivery Receipt Total Value: **₱{total_delivery_amount:,.2f}**")
+
             uploaded_file = st.file_uploader(
                 "📎 Attach File for DR / SI / OR (Photo or PDF)", 
                 type=["png", "jpg", "jpeg", "pdf"],
@@ -1945,37 +1940,50 @@ elif role == "Purchaser":
                 st.image(uploaded_file, caption="Preview of attached document", width=250)
             
             if st.button("Confirm Receiving", type="primary", key="btn_confirm_receiving"):
-                if raw_doc_no.strip():
+                if not raw_doc_no.strip():
+                    st.warning("⚠️ Please input the document number.")
+                elif total_delivery_amount <= 0:
+                    st.warning("⚠️ Delivered quantity must be greater than 0.")
+                else:
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     po_details = pending_recv_df[pending_recv_df['PO Number'] == po_to_receive].iloc[0]
                     
                     receipt_blob = uploaded_file.getvalue() if uploaded_file else None
                     file_name = uploaded_file.name if uploaded_file else None
                     
+                    # 1. Record delivery header with partial delivery total amount for APV
                     c.execute("""INSERT INTO deliveries 
                                  (pono, supplier, project_name, dr_number, total_amount, received_date, receipt_image, file_name) 
                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", 
                               (po_to_receive, po_details['Supplier'], po_details['Project'], dr_number.strip(), 
-                               po_details['Total Amount'], current_time, receipt_blob, file_name))
+                               total_delivery_amount, current_time, receipt_blob, file_name))
                     
-                    c.execute("UPDATE requests SET received_status = 'Received', received_timestamp = ? WHERE pono = ?", 
-                              (current_time, po_to_receive))
-                    
-                    received_items = c.execute("SELECT description, qty FROM requests WHERE pono = ?", (po_to_receive,)).fetchall()
-                    for item_desc, r_qty in received_items:
-                        qty_val = float(r_qty or 0.0)
-                        prev_bal = get_latest_item_balance(c, item_desc)
-                        new_bal = prev_bal + qty_val
-                        c.execute("""
-                            INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks, status)
-                            VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, 'Completed')
-                        """, (current_time, dr_number.strip(), item_desc, qty_val, new_bal, po_details['Project'], f"Received via {dr_number.strip()} (PO #{po_to_receive})"))
+                    # 2. Update received items and update inventory ledger
+                    all_completed = True
+                    for req_id, item_info in received_inputs.items():
+                        qty_today = item_info["qty_today"]
+                        if qty_today > 0:
+                            new_total_rec = item_info["prev_rec"] + qty_today
+                            c.execute("UPDATE requests SET received_qty = ? WHERE id = ?", (new_total_rec, req_id))
+                            
+                            prev_bal = get_latest_item_balance(c, item_info["desc"])
+                            new_bal = prev_bal + qty_today
+                            c.execute("""
+                                INSERT INTO inventory_ledger (date, ref_no, item_description, qty_in, qty_out, balance, location, remarks, status)
+                                VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, 'Completed')
+                            """, (current_time, dr_number.strip(), item_info["desc"], qty_today, new_bal, po_details['Project'], f"Received via {dr_number.strip()} (PO #{po_to_receive})"))
+                        
+                        if (item_info["prev_rec"] + qty_today) < item_info["ordered_qty"]:
+                            all_completed = False
+
+                    # 3. Update overall PO status
+                    po_status = 'Received' if all_completed else 'Partially Received'
+                    c.execute("UPDATE requests SET received_status = ?, received_timestamp = ? WHERE pono = ?", 
+                              (po_status, current_time, po_to_receive))
 
                     conn.commit()
-                    st.session_state["receive_success_msg"] = f"✅ PO #{po_to_receive} received under Doc #{dr_number}! Added to Inventory Ledger and forwarded to Accounting."
+                    st.session_state["receive_success_msg"] = f"✅ PO #{po_to_receive} delivery ({dr_number}) logged! Amount: ₱{total_delivery_amount:,.2f}. Updated inventory ledger & generated APV record."
                     st.rerun()
-                else:
-                    st.warning("⚠️ Please input the document number.")
         else:
             st.success("🎉 No pending deliveries! All approved POs have been physically received.")
 
@@ -2112,6 +2120,60 @@ elif role == "Purchaser":
             st.info("Inventory ledger is currently empty.")
 
     st.markdown("---")
+    st.subheader("⚠️ Rejected Purchase Orders (Action Required)")
+
+    # Fetch rejected POs and include the rejection_reason column
+    rejected_pos = c.execute("""
+        SELECT pono, supplier, project_name, rejection_reason
+        FROM requests 
+        WHERE status = 'Rejected' AND pono IS NOT NULL AND pono != ''
+        GROUP BY pono
+    """).fetchall()
+
+    if not rejected_pos:
+        st.info("No rejected Purchase Orders at this time.")
+    else:
+        for po in rejected_pos:
+            pono, supplier, proj, reason = po
+            
+            with st.expander(f"❌ PO #{pono} | {supplier} | Needs Revision", expanded=True):
+                st.error(f"**Rejection Reason:** {reason}") 
+                
+                po_items_df = pd.read_sql_query(
+                    "SELECT id, item_no, description, qty, unit, price, amount FROM requests WHERE pono = ? AND status = 'Rejected'", 
+                    conn, params=(pono,)
+                )
+                
+                st.write("Update the unit price(s) below:")
+
+                edited_df = st.data_editor(
+                    po_items_df, 
+                    disabled=["id", "item_no", "description", "qty", "unit", "amount"],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={"id": None},
+                    key=f"edit_price_{pono}"
+                )
+                
+                if st.button("💾 Save Prices & Resubmit PO", key=f"resubmit_{pono}", type="primary"):
+                    for index, row in edited_df.iterrows():
+                        new_price = float(row['price'])
+                        new_amount = float(row['qty']) * new_price 
+                        row_id = row['id']
+                        
+                        c.execute("""
+                            UPDATE requests
+                            SET price = ?, amount = ?, status = 'Pending Approval', rejection_reason = NULL
+                            WHERE id = ?
+                        """, (new_price, new_amount, row_id))
+                    
+                    conn.commit()
+                    st.success(f"PO #{pono} resubmitted successfully!")
+                    import time
+                    time.sleep(1)
+                    st.rerun()
+
+    st.markdown("---")
     st.subheader("🖨️ Approved Purchase Orders (Ready for Printing)")
     
     approved_pos = c.execute("""
@@ -2140,7 +2202,7 @@ elif role == "Purchaser":
             )
     elif not approved_pos:
         st.info("No approved purchase orders currently available for printing.")
-
+#=================================================================================
 # --- ROLE 3: APPROVER ---
 elif role == "Approver":
     st.subheader("✅ Approver Dashboard (Leizel Cabunilas)")
