@@ -267,7 +267,7 @@ def init_db():
         c.execute("PRAGMA synchronous = NORMAL;")
         c.execute("PRAGMA busy_timeout = 5000;")
     except Exception:
-        pass # Turso/libsql may safely ignore some PRAGMA statements
+        pass  # Turso/libsql may safely ignore some PRAGMA statements
 
     # 1. Projects Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS projects (
@@ -385,7 +385,8 @@ def init_db():
             debit REAL DEFAULT 0.0,
             credit REAL DEFAULT 0.0,
             ref_no TEXT,
-            description TEXT
+            description TEXT,
+            supplier TEXT
         )
     ''')
 
@@ -411,6 +412,7 @@ def init_db():
             balance REAL DEFAULT 0.0,
             location TEXT,
             remarks TEXT,
+            supplier TEXT,
             status TEXT DEFAULT 'Completed'
         )
     ''')
@@ -425,6 +427,7 @@ def init_db():
     for col_sql in [
         ("materials", "category", "TEXT DEFAULT 'Direct Materials'"),
         ("requests", "category", "TEXT DEFAULT 'Direct Materials'"),
+        ("requests", "supplier", "TEXT"),
         ("suppliers", "terms_days", "INTEGER DEFAULT 0"),
         ("requests", "payment_status", "TEXT DEFAULT 'Unpaid'"),
         ("requests", "received_status", "TEXT DEFAULT 'Pending'"),
@@ -433,6 +436,7 @@ def init_db():
         ("activities", "contract_amount", "REAL DEFAULT 0.0"),
         ("activities", "qty", "REAL DEFAULT 1.0"),
         ("activities", "unit", "TEXT DEFAULT 'lot'"),
+        ("deliveries", "supplier", "TEXT"),
         ("deliveries", "receipt_image", "BLOB"),
         ("deliveries", "file_name", "TEXT"),
         ("deliveries", "apv_number", "TEXT"),
@@ -443,7 +447,9 @@ def init_db():
         ("users", "can_add_act", "TEXT DEFAULT 'No'"),
         ("users", "can_add_item", "TEXT DEFAULT 'No'"),
         ("users", "role6", "TEXT DEFAULT ''"),
-        ("inventory_ledger", "status", "TEXT DEFAULT 'Completed'")
+        ("inventory_ledger", "supplier", "TEXT"),
+        ("inventory_ledger", "status", "TEXT DEFAULT 'Completed'"),
+        ("journal_entries", "supplier", "TEXT")
     ]:
         try:
             c.execute(f"ALTER TABLE {col_sql[0]} ADD COLUMN {col_sql[1]} {col_sql[2]}")
