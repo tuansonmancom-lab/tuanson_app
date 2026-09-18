@@ -2328,19 +2328,29 @@ elif role == "Office Manager":
 # --- ROLE 5: ACCOUNTING ---
 elif role == "Accounting":
 
-    # Automatic schema migration for cheque tracking
-    for col_def in ["cheque_no TEXT", "cheque_date TEXT"]:
+    from datetime import datetime, timedelta
+
+    # Automatic schema migration check for columns across all tables
+    for col_def in ["cv_number TEXT", "cv_date TEXT", "payment_method TEXT", "cheque_no TEXT", "cheque_date TEXT"]:
         try:
             c.execute(f"ALTER TABLE deliveries ADD COLUMN {col_def}")
             conn.commit()
         except Exception:
             pass
-        
-    from datetime import datetime, timedelta
-    
-    # Automatic schema migration check for project_name column
+        try:
+            c.execute(f"ALTER TABLE requests ADD COLUMN {col_def}")
+            conn.commit()
+        except Exception:
+            pass
+
     try:
         c.execute("ALTER TABLE journal_entries ADD COLUMN project_name TEXT")
+        conn.commit()
+    except Exception:
+        pass
+
+    try:
+        c.execute("ALTER TABLE journal_entries ADD COLUMN ref_no TEXT")
         conn.commit()
     except Exception:
         pass
@@ -2684,81 +2694,82 @@ elif role == "Accounting":
             * **Credit:** {selected_bank_name} (Code {selected_bank_code}) — ₱{total_amt:,.2f}
             """)
     
-            #====================
             if st.button("✅ Process Payment & Issue Voucher", type="primary"):
+                try:
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    c_date_str = cheque_date_input.strftime('%Y-%m-%d') if cheque_date_input else ""
+
+                    po_val = selected_po_no.split(" - ")[0].strip() if selected_po_no else ""
+                    apv_val = selected_apv_no.split(" - ")[0].strip() if selected_apv_no else ""
+
+                    if pay_basis == "Standard Payment (APV Basis)":
+                        cv_debit_desc = f"Payment for APV {apv_val} ({supplier_name})"
+                        cv_credit_desc = f"Disbursement for APV {apv_val} via {pay_method}"
+                    else:
+                        cv_debit_desc = f"Advance PDC for PO {po_val} ({supplier_name})"
+                        cv_credit_desc = f"Disbursement for PO {po_val} via {pay_method}"
+
+                    # Update Source Documents
+                    if pay_basis == "Standard Payment (APV Basis)" and apv_val:
+                        try:
+                            c.execute("""
+                                UPDATE deliveries 
+                                SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
+                                WHERE apv_number = ?
+                            """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, apv_val))
+                        except Exception:
+                            c.execute("UPDATE deliveries SET payment_status = 'Paid', cv_number = ?, cv_date = ? WHERE apv_number = ?", 
+                                      (cv_input.strip(), current_time, apv_val))
+                            
+                        if po_val:
+                            c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (po_val,))
+                            
+                    elif pay_basis == "Advance PDC / Downpayment (PO Basis)" and po_val:
+                        try:
+                            c.execute("""
+                                UPDATE requests 
+                                SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
+                                WHERE pono = ?
+                            """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, po_val))
+                        except Exception:
+                            c.execute("UPDATE requests SET payment_status = 'Paid', cv_number = ?, cv_date = ? WHERE pono = ?", 
+                                      (cv_input.strip(), current_time, po_val))
+
+                    # Insert Journal Entries
+                    ref_doc = apv_val if pay_basis == "Standard Payment (APV Basis)" else po_val
+                    
                     try:
-                        # 1. Clean the ID strings to isolate the exact PO/APV number from the dropdown text
-                        po_val = selected_po_no.split(" - ")[0].strip() if selected_po_no else ""
-                        apv_val = selected_apv_no.split(" - ")[0].strip() if selected_apv_no else ""
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                            VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
+                        """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, ref_doc, cv_debit_desc, project_name))
+                    except Exception:
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, description)
+                            VALUES (?, ?, ?, ?, ?, 0.0, ?)
+                        """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, cv_debit_desc))
 
-                        # 2. Update Source Documents
-                        if pay_basis == "Standard Payment (APV Basis)" and apv_val:
-                            try:
-                                c.execute("""
-                                    UPDATE deliveries 
-                                    SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
-                                    WHERE apv_number = ?
-                                """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, apv_val))
-                            except Exception:
-                                # Fallback if extra cheque columns don't exist yet in deliveries
-                                c.execute("UPDATE deliveries SET payment_status = 'Paid', cv_number = ?, cv_date = ? WHERE apv_number = ?", 
-                                          (cv_input.strip(), current_time, apv_val))
-                                
-                            if po_val:
-                                c.execute("UPDATE requests SET payment_status = 'Paid' WHERE pono = ?", (po_val,))
-                                
-                        elif pay_basis == "Advance PDC / Downpayment (PO Basis)" and po_val:
-                            try:
-                                c.execute("""
-                                    UPDATE requests 
-                                    SET payment_status = 'Paid', cv_number = ?, cv_date = ?, payment_method = ?, cheque_no = ?, cheque_date = ?
-                                    WHERE pono = ?
-                                """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, po_val))
-                            except Exception:
-                                # Fallback if extra cheque columns don't exist yet in requests
-                                c.execute("UPDATE requests SET payment_status = 'Paid', cv_number = ?, cv_date = ? WHERE pono = ?", 
-                                          (cv_input.strip(), current_time, po_val))
+                    try:
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                            VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
+                        """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, ref_doc, cv_credit_desc, project_name))
+                    except Exception:
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, description)
+                            VALUES (?, ?, ?, ?, 0.0, ?, ?)
+                        """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, cv_credit_desc))
 
-                        # 3. Insert Journal Entries
-                        ref_doc = apv_val if pay_basis == "Standard Payment (APV Basis)" else po_val
-                        
-                        # Debit Entry
-                        try:
-                            c.execute("""
-                                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                                VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
-                            """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, ref_doc, cv_debit_desc, project_name))
-                        except Exception:
-                            # Fallback if journal_entries lacks ref_no or project_name columns
-                            c.execute("""
-                                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, description)
-                                VALUES (?, ?, ?, ?, ?, 0.0, ?)
-                            """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, cv_debit_desc))
+                    conn.commit()
+                    st.success(f"🎉 Payment processed successfully! Voucher {cv_input} recorded.")
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ Database Error: {e}")
 
-                        # Credit Entry
-                        try:
-                            c.execute("""
-                                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                                VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
-                            """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, ref_doc, cv_credit_desc, project_name))
-                        except Exception:
-                            c.execute("""
-                                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, description)
-                                VALUES (?, ?, ?, ?, 0.0, ?, ?)
-                            """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, cv_credit_desc))
-
-                        conn.commit()
-                        st.success(f"🎉 Payment processed successfully! Voucher {cv_input} recorded.")
-                        st.rerun()
-                        
-                    except Exception as e:
-                        # This catches the exact DB error before Streamlit redacts it
-                        st.error(f"❌ Database Error: {e}")
-            #====================
         st.markdown("---")
         st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
         
-        # 1. Fetch issued vouchers from deliveries (Standard APV payments)
         del_cvs = []
         try:
             del_cvs = c.execute("""
@@ -2769,7 +2780,6 @@ elif role == "Accounting":
         except Exception:
             del_cvs = []
     
-        # 2. Fetch issued vouchers from requests (Advance PDCs / PO payments)
         req_cvs = []
         try:
             req_cvs = c.execute("""
@@ -2781,7 +2791,6 @@ elif role == "Accounting":
         except Exception:
             req_cvs = []
     
-        # 3. Merge both lists and filter duplicates, sorting by cv_date descending
         seen_cvs = set()
         issued_cvs = []
         for record in (del_cvs + req_cvs):
@@ -2820,14 +2829,13 @@ elif role == "Accounting":
                 st.markdown("---")
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
-        #====================================================================================
-        # --- ADMIN ONLY: VOUCHER RESET TOOL ---
-        if role == "Admin View All":
+
+        # --- ADMIN / VOUCHER RESET TOOL ---
+        if role in ["Accounting", "Admin View All"]:
             st.markdown("---")
             with st.expander("🗑️ Admin Tool: Delete / Reset Payment Voucher Record"):
                 st.warning("⚠️ Deleting a voucher will revert the corresponding APV/PO status back to 'Unpaid' and remove its journal entries.")
                 
-                # Safely gather distinct voucher numbers across all tables in Python
                 cv_set = set()
                 
                 try:
@@ -2854,7 +2862,6 @@ elif role == "Accounting":
                     selected_del_cv = st.selectbox("Select Voucher Number to Delete/Reset:", cv_options)
                     
                     if st.button(f"🔥 Reset & Delete Voucher {selected_del_cv}", type="primary"):
-                        # 1. Reset deliveries back to Unpaid
                         try:
                             c.execute("""
                                 UPDATE deliveries 
@@ -2865,7 +2872,6 @@ elif role == "Accounting":
                         except Exception:
                             pass
                         
-                        # 2. Reset requests back to Unpaid
                         try:
                             c.execute("""
                                 UPDATE requests 
@@ -2876,7 +2882,6 @@ elif role == "Accounting":
                         except Exception:
                             pass
                         
-                        # 3. Remove accounting journal entries
                         try:
                             c.execute("DELETE FROM journal_entries WHERE voucher_no = ?", (selected_del_cv,))
                         except Exception:
@@ -2887,91 +2892,89 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
-            #===================================================================
-   
-    
-        # --- TAB 3: GENERAL LEDGER ---
-        with tab_gl:
-            st.write("### 📖 Real-Time General Ledger Journal Entries")
+
+    # --- TAB 3: GENERAL LEDGER ---
+    with tab_gl:
+        st.write("### 📖 Real-Time General Ledger Journal Entries")
+        
+        gl_df = pd.read_sql_query("""
+            SELECT 
+                j.id AS 'Entry ID', 
+                j.entry_date AS 'Date', 
+                j.voucher_no AS 'Voucher No', 
+                j.account_code AS 'Account Code', 
+                j.account_name AS 'Account Name', 
+                j.debit AS 'Debit', 
+                j.credit AS 'Credit', 
+                j.ref_no AS 'Ref Doc', 
+                j.description AS 'Description',
+                COALESCE(NULLIF(j.project_name, ''), d.project_name, '') AS 'Project Name',
+                COALESCE(d.supplier, '') AS 'Supplier'
+            FROM journal_entries j
+            LEFT JOIN deliveries d ON (j.ref_no = d.dr_number OR j.ref_no = d.apv_number OR j.ref_no = d.cv_number)
+            ORDER BY j.id DESC
+        """, conn)
+        
+        suppliers_df = pd.read_sql_query("SELECT DISTINCT supplier FROM deliveries WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC", conn)
+        supplier_list = suppliers_df['supplier'].tolist() if not suppliers_df.empty else []
+
+        if not gl_df.empty:
+            st.markdown("---")
+            st.subheader("🔍 Filter & Subsummary")
             
-            gl_df = pd.read_sql_query("""
-                SELECT 
-                    j.id AS 'Entry ID', 
-                    j.entry_date AS 'Date', 
-                    j.voucher_no AS 'Voucher No', 
-                    j.account_code AS 'Account Code', 
-                    j.account_name AS 'Account Name', 
-                    j.debit AS 'Debit', 
-                    j.credit AS 'Credit', 
-                    j.ref_no AS 'Ref Doc', 
-                    j.description AS 'Description',
-                    COALESCE(NULLIF(j.project_name, ''), d.project_name, '') AS 'Project Name',
-                    COALESCE(d.supplier, '') AS 'Supplier'
-                FROM journal_entries j
-                LEFT JOIN deliveries d ON (j.ref_no = d.dr_number OR j.ref_no = d.apv_number OR j.ref_no = d.cv_number)
-                ORDER BY j.id DESC
-            """, conn)
+            col_f1, col_f2, col_f3 = st.columns(3)
             
-            suppliers_df = pd.read_sql_query("SELECT DISTINCT supplier FROM deliveries WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC", conn)
-            supplier_list = suppliers_df['supplier'].tolist() if not suppliers_df.empty else []
-    
-            if not gl_df.empty:
-                st.markdown("---")
-                st.subheader("🔍 Filter & Subsummary")
+            all_accounts = ["All Account Titles"] + sorted(gl_df['Account Name'].dropna().unique().tolist())
+            selected_account = col_f1.selectbox("Filter by Account Title", all_accounts, key="gl_filter_acc")
+            
+            all_suppliers = ["All Suppliers"] + sorted(supplier_list)
+            selected_supplier = col_f2.selectbox("Filter by Supplier", all_suppliers, key="gl_filter_sup")
+            
+            project_list = sorted([str(p) for p in gl_df['Project Name'].dropna().unique().tolist() if str(p).strip() != ''])
+            all_projects = ["All Projects"] + project_list
+            selected_project = col_f3.selectbox("Filter by Project", all_projects, key="gl_filter_proj")
+            
+            filtered_df = gl_df.copy()
+            
+            if selected_account != "All Account Titles":
+                filtered_df = filtered_df[filtered_df['Account Name'] == selected_account]
                 
-                col_f1, col_f2, col_f3 = st.columns(3)
+            if selected_supplier != "All Suppliers":
+                filtered_df = filtered_df[
+                    (filtered_df['Supplier'] == selected_supplier) | 
+                    (filtered_df['Description'].str.contains(selected_supplier, case=False, na=False))
+                ]
                 
-                all_accounts = ["All Account Titles"] + sorted(gl_df['Account Name'].dropna().unique().tolist())
-                selected_account = col_f1.selectbox("Filter by Account Title", all_accounts, key="gl_filter_acc")
-                
-                all_suppliers = ["All Suppliers"] + sorted(supplier_list)
-                selected_supplier = col_f2.selectbox("Filter by Supplier", all_suppliers, key="gl_filter_sup")
-                
-                project_list = sorted([str(p) for p in gl_df['Project Name'].dropna().unique().tolist() if str(p).strip() != ''])
-                all_projects = ["All Projects"] + project_list
-                selected_project = col_f3.selectbox("Filter by Project", all_projects, key="gl_filter_proj")
-                
-                filtered_df = gl_df.copy()
-                
-                if selected_account != "All Account Titles":
-                    filtered_df = filtered_df[filtered_df['Account Name'] == selected_account]
-                    
-                if selected_supplier != "All Suppliers":
-                    filtered_df = filtered_df[
-                        (filtered_df['Supplier'] == selected_supplier) | 
-                        (filtered_df['Description'].str.contains(selected_supplier, case=False, na=False))
-                    ]
-                    
-                if selected_project != "All Projects":
-                    filtered_df = filtered_df[filtered_df['Project Name'] == selected_project]
-    
-                sub_debit = filtered_df["Debit"].sum()
-                sub_credit = filtered_df["Credit"].sum()
-                sub_net = sub_debit - sub_credit
-    
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Filtered Total Debits", f"₱{sub_debit:,.2f}")
-                m2.metric("Filtered Total Credits", f"₱{sub_credit:,.2f}")
-                m3.metric("Net Activity (Debit - Credit)", f"₱{sub_net:,.2f}")
-                
-                st.markdown("---")
-                
-                display_df = filtered_df.drop(columns=['Supplier'])
-                st.dataframe(
-                    display_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), 
-                    use_container_width=True, 
-                    hide_index=True
-                )
-    
-                csv_gl = display_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Filtered General Ledger as CSV",
-                    data=csv_gl,
-                    file_name=f"general_ledger_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
+            if selected_project != "All Projects":
+                filtered_df = filtered_df[filtered_df['Project Name'] == selected_project]
+
+            sub_debit = filtered_df["Debit"].sum()
+            sub_credit = filtered_df["Credit"].sum()
+            sub_net = sub_debit - sub_credit
+
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Filtered Total Debits", f"₱{sub_debit:,.2f}")
+            m2.metric("Filtered Total Credits", f"₱{sub_credit:,.2f}")
+            m3.metric("Net Activity (Debit - Credit)", f"₱{sub_net:,.2f}")
+            
+            st.markdown("---")
+            
+            display_df = filtered_df.drop(columns=['Supplier'])
+            st.dataframe(
+                display_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), 
+                use_container_width=True, 
+                hide_index=True
+            )
+
+            csv_gl = display_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Filtered General Ledger as CSV",
+                data=csv_gl,
+                file_name=f"general_ledger_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
 
     # --- TAB 4: FINANCIAL STATEMENTS ---
     with tab_fs:
