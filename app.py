@@ -450,6 +450,14 @@ def init_db():
         except Exception:
             pass
 
+    # Add payment_terms column to suppliers table if it doesn't exist yet
+    try:
+        c.execute("ALTER TABLE suppliers ADD COLUMN payment_terms TEXT DEFAULT 'Standard (APV)';")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
+    #==========================================================================
+    
     # --- SEED INITIAL DATA ---
     c.execute("SELECT COUNT(*) FROM projects")
     if c.fetchone()[0] == 0:
