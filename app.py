@@ -2790,49 +2790,72 @@ elif role == "Accounting":
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
         #====================================================================================
-        st.markdown("---")
-        with st.expander("🗑️ Admin Tool: Delete / Reset Payment Voucher Record"):
-            st.warning("⚠️ Deleting a voucher will revert the corresponding APV/PO status back to 'Unpaid' and remove its journal entries.")
-            
-            # Get list of existing vouchers to choose from
-            existing_cvs = c.execute("""
-                SELECT DISTINCT voucher_no FROM journal_entries WHERE voucher_no LIKE 'CV-%' OR voucher_no LIKE 'CAV-%'
-                UNION
-                SELECT DISTINCT cv_number FROM deliveries WHERE cv_number IS NOT NULL AND cv_number != ''
-                UNION
-                SELECT DISTINCT cv_number FROM requests WHERE cv_number IS NOT NULL AND cv_number != ''
-            """).fetchall()
-            
-            cv_options = [r[0] for r in existing_cvs if r[0]]
-            
-            if cv_options:
-                selected_del_cv = st.selectbox("Select Voucher Number to Delete/Reset:", cv_options)
+        # --- ADMIN ONLY: VOUCHER RESET TOOL ---
+        if role == "Admin View All":
+            st.markdown("---")
+            with st.expander("🗑️ Admin Tool: Delete / Reset Payment Voucher Record"):
+                st.warning("⚠️ Deleting a voucher will revert the corresponding APV/PO status back to 'Unpaid' and remove its journal entries.")
                 
-                if st.button(f"🔥 Reset & Delete Voucher {selected_del_cv}", type="primary"):
-                    # 1. Reset deliveries back to Unpaid
-                    c.execute("""
-                        UPDATE deliveries 
-                        SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, 
-                            payment_method = NULL, cheque_no = NULL, cheque_date = NULL 
-                        WHERE cv_number = ?
-                    """, (selected_del_cv,))
+                # Safely gather distinct voucher numbers across all tables in Python
+                cv_set = set()
+                
+                try:
+                    res1 = c.execute("SELECT DISTINCT voucher_no FROM journal_entries WHERE voucher_no LIKE 'CV-%' OR voucher_no LIKE 'CAV-%'").fetchall()
+                    cv_set.update([r[0] for r in res1 if r[0]])
+                except Exception:
+                    pass
+    
+                try:
+                    res2 = c.execute("SELECT DISTINCT cv_number FROM deliveries WHERE cv_number IS NOT NULL AND cv_number != ''").fetchall()
+                    cv_set.update([r[0] for r in res2 if r[0]])
+                except Exception:
+                    pass
+    
+                try:
+                    res3 = c.execute("SELECT DISTINCT cv_number FROM requests WHERE cv_number IS NOT NULL AND cv_number != ''").fetchall()
+                    cv_set.update([r[0] for r in res3 if r[0]])
+                except Exception:
+                    pass
+    
+                cv_options = sorted(list(cv_set))
+                
+                if cv_options:
+                    selected_del_cv = st.selectbox("Select Voucher Number to Delete/Reset:", cv_options)
                     
-                    # 2. Reset requests back to Unpaid
-                    c.execute("""
-                        UPDATE requests 
-                        SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, 
-                            payment_method = NULL, cheque_no = NULL, cheque_date = NULL 
-                        WHERE cv_number = ?
-                    """, (selected_del_cv,))
-                    
-                    # 3. Remove accounting journal entries
-                    c.execute("DELETE FROM journal_entries WHERE voucher_no = ?", (selected_del_cv,))
-                    
-                    conn.commit()
-                    st.success(f"🎉 Voucher {selected_del_cv} has been deleted and its linked APV/PO status reset to Unpaid!")
-                    st.rerun()
-            else:
-                st.info("No recorded payment vouchers found to delete.")
+                    if st.button(f"🔥 Reset & Delete Voucher {selected_del_cv}", type="primary"):
+                        # 1. Reset deliveries back to Unpaid
+                        try:
+                            c.execute("""
+                                UPDATE deliveries 
+                                SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, 
+                                    payment_method = NULL, cheque_no = NULL, cheque_date = NULL 
+                                WHERE cv_number = ?
+                            """, (selected_del_cv,))
+                        except Exception:
+                            pass
+                        
+                        # 2. Reset requests back to Unpaid
+                        try:
+                            c.execute("""
+                                UPDATE requests 
+                                SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, 
+                                    payment_method = NULL, cheque_no = NULL, cheque_date = NULL 
+                                WHERE cv_number = ?
+                            """, (selected_del_cv,))
+                        except Exception:
+                            pass
+                        
+                        # 3. Remove accounting journal entries
+                        try:
+                            c.execute("DELETE FROM journal_entries WHERE voucher_no = ?", (selected_del_cv,))
+                        except Exception:
+                            pass
+                        
+                        conn.commit()
+                        st.success(f"🎉 Voucher {selected_del_cv} has been deleted and its linked APV/PO status reset to Unpaid!")
+                        st.rerun()
+                else:
+                    st.info("No recorded payment vouchers found to delete.")
             #===================================================================
    
     
