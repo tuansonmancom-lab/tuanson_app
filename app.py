@@ -79,13 +79,13 @@ def register_roboto_font():
 # Run registration on app startup
 ROBOTO_READY = register_roboto_font()
 
-
+#================================================================
 def amount_to_words(amount):
-    """Converts numeric amounts to formal Philippine Currency words."""
+    """Converts numeric amounts to Philippine Currency words matching custom CV PDF format."""
     try:
         amount = float(amount)
     except (ValueError, TypeError):
-        return "ZERO PESOS ONLY"
+        return "ZERO PESOS"
     
     pesos = int(amount)
     cents = int(round((amount - pesos) * 100))
@@ -120,8 +120,12 @@ def amount_to_words(amount):
             parts.append(_convert_below_thousand(pesos))
         words_str = " ".join(parts)
 
-    cents_str = f"{cents:02d}/100"
-    return f"PHILIPPINE PESO {words_str} AND {cents_str} ONLY"
+    currency = "PESO" if int(amount) == 1 else "PESOS"
+
+    if cents > 0:
+        return f"{words_str} {currency} AND {cents:02d}/100."
+    else:
+        return f"{words_str} {currency}"
 #===========================================================
 def generate_voucher_number(c, col_name, prefix):
     """Generates a strictly unique voucher number across all accounting tables."""
