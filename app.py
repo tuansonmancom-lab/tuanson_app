@@ -2789,6 +2789,51 @@ elif role == "Accounting":
                 st.markdown("---")
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
+        #====================================================================================
+        st.markdown("---")
+        with st.expander("🗑️ Admin Tool: Delete / Reset Payment Voucher Record"):
+            st.warning("⚠️ Deleting a voucher will revert the corresponding APV/PO status back to 'Unpaid' and remove its journal entries.")
+            
+            # Get list of existing vouchers to choose from
+            existing_cvs = c.execute("""
+                SELECT DISTINCT voucher_no FROM journal_entries WHERE voucher_no LIKE 'CV-%' OR voucher_no LIKE 'CAV-%'
+                UNION
+                SELECT DISTINCT cv_number FROM deliveries WHERE cv_number IS NOT NULL AND cv_number != ''
+                UNION
+                SELECT DISTINCT cv_number FROM requests WHERE cv_number IS NOT NULL AND cv_number != ''
+            """).fetchall()
+            
+            cv_options = [r[0] for r in existing_cvs if r[0]]
+            
+            if cv_options:
+                selected_del_cv = st.selectbox("Select Voucher Number to Delete/Reset:", cv_options)
+                
+                if st.button(f"🔥 Reset & Delete Voucher {selected_del_cv}", type="primary"):
+                    # 1. Reset deliveries back to Unpaid
+                    c.execute("""
+                        UPDATE deliveries 
+                        SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, 
+                            payment_method = NULL, cheque_no = NULL, cheque_date = NULL 
+                        WHERE cv_number = ?
+                    """, (selected_del_cv,))
+                    
+                    # 2. Reset requests back to Unpaid
+                    c.execute("""
+                        UPDATE requests 
+                        SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, 
+                            payment_method = NULL, cheque_no = NULL, cheque_date = NULL 
+                        WHERE cv_number = ?
+                    """, (selected_del_cv,))
+                    
+                    # 3. Remove accounting journal entries
+                    c.execute("DELETE FROM journal_entries WHERE voucher_no = ?", (selected_del_cv,))
+                    
+                    conn.commit()
+                    st.success(f"🎉 Voucher {selected_del_cv} has been deleted and its linked APV/PO status reset to Unpaid!")
+                    st.rerun()
+            else:
+                st.info("No recorded payment vouchers found to delete.")
+            #===================================================================
    
     
         # --- TAB 3: GENERAL LEDGER ---
