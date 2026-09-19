@@ -193,31 +193,45 @@ def get_income_statement(conn, start_date, end_date):
         ORDER BY c.account_code ASC
     """
     return pd.read_sql_query(query, conn, params=(start_str, end_str))
-
+#==================================================================
 def get_balance_sheet(conn, as_of_date):
-    as_of_str = str(as_of_date)
+    # Format end of date boundary
+    as_of_str = pd.to_datetime(as_of_date).strftime('%Y-%m-%d 23:59:59')
     
     query = """
         SELECT 
-            c.account_code,
-            c.account_name,
-            c.account_type,
-            COALESCE(SUM(j.debit), 0.0) as total_debit,
-            COALESCE(SUM(j.credit), 0.0) as total_credit,
-            CASE 
-                WHEN c.account_type = 'Asset' THEN COALESCE(SUM(j.debit - j.credit), 0.0)
-                ELSE COALESCE(SUM(j.credit - j.debit), 0.0)
-            END as amount
-        FROM chart_of_accounts c
-        LEFT JOIN journal_entries j ON c.account_code = j.account_code 
-            AND DATE(j.entry_date) <= ?
-        WHERE c.account_type IN ('Asset', 'Liability', 'Equity')
-        GROUP BY c.account_code, c.account_name, c.account_type
+            j.account_code,
+            j.account_name,
+            COALESCE(c.account_type, 
+                CASE 
+                    WHEN j.account_code LIKE '1%' THEN 'Asset'
+                    WHEN j.account_code LIKE '2%' THEN 'Liability'
+                    WHEN j.account_code LIKE '3%' THEN 'Equity'
+                    ELSE 'Other'
+                END
+            ) AS account_type,
+            SUM(
+                CASE 
+                    WHEN j.account_code LIKE '1%' THEN (j.debit - j.credit)
+                    WHEN j.account_code LIKE '2%' THEN (j.credit - j.debit)
+                    WHEN j.account_code LIKE '3%' THEN (j.credit - j.debit)
+                    ELSE (j.debit - j.credit)
+                END
+            ) AS amount
+        FROM journal_entries j
+        LEFT JOIN chart_of_accounts c ON j.account_code = c.account_code
+        WHERE (
+            c.account_type IN ('Asset', 'Liability', 'Equity') 
+            OR j.account_code LIKE '1%' 
+            OR j.account_code LIKE '2%' 
+            OR j.account_code LIKE '3%'
+        )
+        AND j.entry_date <= ?
+        GROUP BY j.account_code, j.account_name, account_type
         HAVING amount != 0
-        ORDER BY c.account_code ASC
     """
-    return pd.read_sql_query(query, conn, params=(as_of_str,))
-    
+    return pd.read_sql_query(query, conn, params=[as_of_str])    
+#=====================================================================
 
 # --- REPORTLAB PDF GENERATION LIBRARIES ---
 try:
@@ -3143,67 +3157,76 @@ elif role == "Accounting":
             st.metric("NET INCOME / (LOSS)", f"₱{net_income:,.2f}")
         #==============================================================================================
         # --- TAB 4: SUBTAB 1 (BALANCE SHEET) ---
-        with subtab_bs:
-            st.write("### Balance Sheet")
-            as_of_date = st.date_input("As of Date", value=datetime.now().date(), key="bs_date")
-            as_of_str = as_of_date.strftime('%Y-%m-%d 23:59:59')
+        with fs_tab2:
+            st.subheader("Balance Sheet")
+            as_of = st.date_input("As of Date", pd.to_datetime("2026-12-31"))
         
-            # Fetch Assets (All 1xxxx series or Chart of Accounts tagged as 'Asset')
-            assets_df = pd.read_sql_query("""
-                SELECT j.account_code AS Code, j.account_name AS Account, 
-                       SUM(j.debit - j.credit) AS `Amount (₱)`
-                FROM journal_entries j
-                LEFT JOIN chart_of_accounts c ON j.account_code = c.account_code
-                WHERE (c.account_type = 'Asset' OR j.account_code LIKE '1%')
-                  AND j.entry_date <= ?
-                GROUP BY j.account_code, j.account_name
-                HAVING `Amount (₱)` != 0
-            """, conn, params=[as_of_str])
+            df_bs = get_balance_sheet(conn, as_of)
+            
+            df_is_till_date = get_income_statement(conn, "1900-01-01", as_of)
+            
+            rev_until = df_is_till_date[df_is_till_date['account_type'] == 'Revenue']['amount'].sum() if not df_is_till_date.empty and 'account_type' in df_is_till_date.columns else 0.0
+            exp_until = df_is_till_date[df_is_till_date['account_type'] == 'Expense']['amount'].sum() if not df_is_till_date.empty and 'account_type' in df_is_till_date.columns else 0.0
+            current_net_income = rev_until - exp_until
         
-            # Fetch Liabilities (All 2xxxx series or Chart of Accounts tagged as 'Liability')
-            liab_df = pd.read_sql_query("""
-                SELECT j.account_code AS Code, j.account_name AS Account, 
-                       SUM(j.credit - j.debit) AS `Amount (₱)`
-                FROM journal_entries j
-                LEFT JOIN chart_of_accounts c ON j.account_code = c.account_code
-                WHERE (c.account_type = 'Liability' OR j.account_code LIKE '2%')
-                  AND j.entry_date <= ?
-                GROUP BY j.account_code, j.account_name
-                HAVING `Amount (₱)` != 0
-            """, conn, params=[as_of_str])
+            assets = df_bs[df_bs['account_type'] == 'Asset'] if not df_bs.empty else pd.DataFrame()
+            liabilities = df_bs[df_bs['account_type'] == 'Liability'] if not df_bs.empty else pd.DataFrame()
+            equity = df_bs[df_bs['account_type'] == 'Equity'] if not df_bs.empty else pd.DataFrame()
         
-            # Fetch Net Income from P&L calculation
-            rev_tot = pd.read_sql_query("SELECT SUM(credit - debit) FROM journal_entries WHERE account_code LIKE '4%' AND entry_date <= ?", conn, params=[as_of_str]).iloc[0, 0] or 0.0
-            exp_tot = pd.read_sql_query("SELECT SUM(debit - credit) FROM journal_entries WHERE (account_code LIKE '5%' OR account_code LIKE '6%' OR account_code LIKE '7%') AND entry_date <= ?", conn, params=[as_of_str]).iloc[0, 0] or 0.0
-            net_income = rev_tot - exp_tot
+            tot_assets = assets['amount'].sum() if not assets.empty else 0.0
+            tot_liab = liabilities['amount'].sum() if not liabilities.empty else 0.0
+            tot_equity = (equity['amount'].sum() if not equity.empty else 0.0) + current_net_income
         
-            total_assets = assets_df['Amount (₱)'].sum() if not assets_df.empty else 0.0
-            total_liab = liab_df['Amount (₱)'].sum() if not liab_df.empty else 0.0
-            total_equity = net_income # Add retained earnings / owner equity if applicable
-            total_liab_equity = total_liab + total_equity
-        
-            col_a, col_l = st.columns(2)
-        
+            col_a, col_b = st.columns(2)
             with col_a:
-                st.write("**Assets**")
-                st.dataframe(assets_df.style.format({"Amount (₱)": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
-                st.metric("Total Assets", f"₱{total_assets:,.2f}")
+                st.markdown("**Assets**")
+                if not assets.empty:
+                    st.dataframe(
+                        assets[['account_code', 'account_name', 'amount']]
+                        .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
+                        .style.format({"Amount (₱)": "₱{:,.2f}"}), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                else:
+                    st.info("No asset entries found.")
+                st.metric("Total Assets", f"₱{tot_assets:,.2f}")
         
-            with col_l:
-                st.write("**Liabilities**")
-                st.dataframe(liab_df.style.format({"Amount (₱)": "₱{:,.2f}"}), use_container_width=True, hide_index=True)
-                st.metric("Total Liabilities", f"₱{total_liab:,.2f}")
+            with col_b:
+                st.markdown("**Liabilities**")
+                if not liabilities.empty:
+                    st.dataframe(
+                        liabilities[['account_code', 'account_name', 'amount']]
+                        .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
+                        .style.format({"Amount (₱)": "₱{:,.2f}"}), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                else:
+                    st.info("No liability entries found.")
+                st.metric("Total Liabilities", f"₱{tot_liab:,.2f}")
+                
+                st.markdown("**Equity**")
+                if not equity.empty:
+                    st.dataframe(
+                        equity[['account_code', 'account_name', 'amount']]
+                        .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
+                        .style.format({"Amount (₱)": "₱{:,.2f}"}), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                
+                st.write(f"Current Period Net Profit: **₱{current_net_income:,.2f}**")
+                st.metric("Total Equity", f"₱{tot_equity:,.2f}")
         
-                st.write("**Equity**")
-                st.write(f"Current Period Net Profit: **₱{net_income:,.2f}**")
-                st.metric("Total Equity", f"₱{total_equity:,.2f}")
-        
-            # Balance Verification Check
-            variance = abs(total_assets - total_liab_equity)
-            if variance < 0.01:
-                st.success(f"✅ Balanced! Total Assets (₱{total_assets:,.2f}) = Total Liabilities & Equity (₱{total_liab_equity:,.2f})")
+            st.divider()
+            tot_liab_equity = tot_liab + tot_equity
+            balanced = abs(tot_assets - tot_liab_equity) < 0.01
+            
+            if balanced:
+                st.success(f"✅ Balance Check Passed: Total Assets (₱{tot_assets:,.2f}) = Liabilities + Equity (₱{tot_liab_equity:,.2f})")
             else:
-                st.error(f"⚠️ Unbalanced! Assets: ₱{total_assets:,.2f} | Liabilities + Equity: ₱{total_liab_equity:,.2f}")
+                st.error(f"⚠️ Unbalanced! Assets: ₱{tot_assets:,.2f} | Liabilities + Equity: ₱{tot_liab_equity:,.2f}")
 #==================================================================================
 # --- ROLE 6: ADMIN VIEW ALL ---
 elif role == "Admin View All":
