@@ -195,10 +195,10 @@ def get_income_statement(conn, start_date, end_date):
     return pd.read_sql_query(query, conn, params=(start_str, end_str))
 #==================================================================
 def get_balance_sheet(conn, as_of_date):
-    # Format end of date boundary
+    # Format date boundary string safely
     as_of_str = pd.to_datetime(as_of_date).strftime('%Y-%m-%d 23:59:59')
     
-    query = """
+    query = f"""
         SELECT 
             j.account_code,
             j.account_name,
@@ -226,11 +226,11 @@ def get_balance_sheet(conn, as_of_date):
             OR j.account_code LIKE '2%' 
             OR j.account_code LIKE '3%'
         )
-        AND j.entry_date <= ?
+        AND j.entry_date <= '{as_of_str}'
         GROUP BY j.account_code, j.account_name, account_type
         HAVING amount != 0
     """
-    return pd.read_sql_query(query, conn, params=[as_of_str])    
+    return pd.read_sql_query(query, conn)    
 #=====================================================================
 
 # --- REPORTLAB PDF GENERATION LIBRARIES ---
