@@ -127,58 +127,47 @@ def amount_to_words(amount):
     else:
         return f"{words_str} {currency}"
 #===========================================================
-import re
-
-def generate_voucher_number(db_obj, arg2, arg3=None):
-    """
-    Flexible Voucher Sequence Generator.
-    Supports both signatures:
-      - generate_voucher_number(conn, prefix)
-      - generate_voucher_number(c, col_name, prefix)
-    """
-    # Determine the prefix from either 2nd or 3rd argument
-    prefix = arg3 if arg3 is not None else arg2
-
-    # Safely obtain a cursor or use existing cursor
-    if hasattr(db_obj, 'cursor'):
-        try:
-            cur = db_obj.cursor()
-        except Exception:
-            cur = db_obj
-    else:
-        cur = db_obj
-
+def generate_voucher_number(cursor, col_name, prefix):
     existing_numbers = []
-    queries = [
-        ("journal_entries", "voucher_no"),
-        ("deliveries", "cv_number"),
-        ("requests", "cv_number"),
-        ("floating_checks", "voucher_no")
-    ]
     
-    for table, col in queries:
-        try:
-            sql = f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''"
-            rows = cur.execute(sql).fetchall()
-            for r in rows:
-                if r and r[0]:
-                    val = str(r[0]).strip()
-                    if val.upper().startswith(str(prefix).upper()):
-                        existing_numbers.append(val)
-        except Exception:
-            pass
+    # 1. Scan journal_entries
+    try:
+        res = cursor.execute("SELECT DISTINCT voucher_no FROM journal_entries WHERE voucher_no LIKE ?", (f"{prefix}-%",)).fetchall()
+        existing_numbers.extend([r[0] for r in res if r[0]])
+    except Exception:
+        pass
 
+    # 2. Scan deliveries
+    try:
+        res = cursor.execute("SELECT DISTINCT cv_number FROM deliveries WHERE cv_number LIKE ?", (f"{prefix}-%",)).fetchall()
+        existing_numbers.extend([r[0] for r in res if r[0]])
+    except Exception:
+        pass
+
+    # 3. Scan requests
+    try:
+        res = cursor.execute("SELECT DISTINCT cv_number FROM requests WHERE cv_number LIKE ?", (f"{prefix}-%",)).fetchall()
+        existing_numbers.extend([r[0] for r in res if r[0]])
+    except Exception:
+        pass
+
+    # 4. Scan floating_checks
+    try:
+        res = cursor.execute("SELECT DISTINCT voucher_no FROM floating_checks WHERE voucher_no LIKE ?", (f"{prefix}-%",)).fetchall()
+        existing_numbers.extend([r[0] for r in res if r[0]])
+    except Exception:
+        pass
+
+    # Extract maximum numeric sequence
     max_num = 0
     for v_no in existing_numbers:
-        digits = re.findall(r'\d+', v_no)
-        if digits:
-            try:
-                num = int(digits[-1])
-                if num > max_num:
-                    max_num = num
-            except ValueError:
-                pass
-
+        try:
+            num_part = int(str(v_no).split('-')[-1])
+            if num_part > max_num:
+                max_num = num_part
+        except (ValueError, IndexError):
+            pass
+            
     next_num = max_num + 1
     return f"{prefix}-{next_num:05d}"
 #=================================================================    
@@ -2845,8 +2834,7 @@ elif role == "Accounting":
             selected_bank_code = bank_choice.split("]")[0].replace("[", "")
             selected_bank_name = bank_choice.split("]")[1].strip()
             
-            #suggested_cv = generate_voucher_number(c, "cv_number", prefix)
-            suggested_cv = generate_voucher_number(conn, prefix)
+            suggested_cv = generate_voucher_number(c, "cv_number", prefix)
             cv_input = col3.text_input("Voucher Number Sequence", value=suggested_cv, key=f"cv_inp_{prefix}_{suggested_cv}")
     
             # --- Dynamic Date & Floating Check Toggle ---
