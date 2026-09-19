@@ -2648,7 +2648,7 @@ elif role == "Accounting":
             st.info("No generated APVs available for printing yet.")
 
     # ==========================================================================================
-    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV & PCV) ---
+    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV, PCV & FLOATING CHECKS) ---
     with tab_payment:
         st.write("### 💳 Outstanding Payables & AP Aging Summary")
         
@@ -2833,43 +2833,50 @@ elif role == "Accounting":
             suggested_cv = generate_voucher_number(c, "cv_number", prefix)
             cv_input = col3.text_input("Voucher Number Sequence", value=suggested_cv, key=f"cv_inp_{prefix}_{suggested_cv}")
     
-            # --- Dynamic Label based on Payment Mode ---
+            # --- Dynamic Date & Floating Check Toggle ---
             if pay_basis == "Advance PDC / Downpayment (PO Basis)":
                 date_label = "📆 PDC Maturity / Cheque Date"
             elif pay_basis == "Petty Cash / Direct Expense Liquidation (Non-PO)":
                 date_label = "📅 Liquidation / Expense Date"
             else:
                 date_label = "📅 Cheque / Disbursement Date"
-
+    
             col_d1, col_d2 = st.columns(2)
             cheque_no_input = col_d1.text_input("Cheque/OR Ref Number (Optional)", value="")
-            cheque_date_input = col_d2.date_input(
-                date_label, 
-                value=datetime.now().date(),
-                key=f"chk_date_{pay_basis.replace(' ', '_')}"
-            )
+            
+            with col_d2:
+                cheque_date_input = st.date_input(
+                    date_label, 
+                    value=datetime.now().date(),
+                    key=f"chk_date_{pay_basis.replace(' ', '_')}"
+                )
+                is_floating_check = st.checkbox("🎟️ Print Blank Date on Cheque (Open Date / Floating Check)", value=False)
+    
+            # Preview GL Account Routing based on Floating Check status
+            credit_preview_code = "20200" if (is_floating_check and pay_method == "Check") else selected_bank_code
+            credit_preview_name = "Checks Payable / PDC Issued" if (is_floating_check and pay_method == "Check") else selected_bank_name
     
             st.info(f"""
             💡 **Accounting Entry Preview:**
             * **Debit:** {debit_acct_name} (Code {debit_acct_code}) — ₱{total_amt:,.2f}
-            * **Credit:** {selected_bank_name} (Code {selected_bank_code}) — ₱{total_amt:,.2f}
+            * **Credit:** {credit_preview_name} (Code {credit_preview_code}) — ₱{total_amt:,.2f}
             """)
     
             if st.button("✅ Process Payment & Issue Voucher", type="primary"):
                 try:
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    c_date_str = cheque_date_input.strftime('%Y-%m-%d') if cheque_date_input else ""
+                    c_date_str = "" if is_floating_check else cheque_date_input.strftime('%Y-%m-%d')
     
                     po_val = selected_po_no.split(" - ")[0].strip() if selected_po_no else ""
                     apv_val = selected_apv_no.split(" - ")[0].strip() if selected_apv_no else ""
     
                     if pay_basis == "Standard Payment (APV Basis)":
                         cv_debit_desc = f"Payment for APV {apv_val} ({supplier_name})"
-                        cv_credit_desc = f"Disbursement for APV {apv_val} via {pay_method}"
+                        cv_credit_desc = f"Disbursement for APV {apv_val} via {'Floating Check' if is_floating_check else pay_method}"
                         ref_doc = apv_val
                     elif pay_basis == "Advance PDC / Downpayment (PO Basis)":
                         cv_debit_desc = f"Advance PDC for PO {po_val} ({supplier_name})"
-                        cv_credit_desc = f"Disbursement for PO {po_val} via {pay_method}"
+                        cv_credit_desc = f"Disbursement for PO {po_val} via {'Floating Check' if is_floating_check else pay_method}"
                         ref_doc = po_val
                     else:
                         cv_debit_desc = f"PCV Expense: {pcv_description} ({supplier_name})"
@@ -2902,7 +2909,15 @@ elif role == "Accounting":
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), selected_bank_code, selected_bank_name, total_amt, ref_doc, cv_credit_desc, project_name))
+                    """, (current_time, cv_input.strip(), credit_preview_code, credit_preview_name, total_amt, ref_doc, cv_credit_desc, project_name))
+    
+                    # If Open-Dated Floating Check, insert record into Turso floating_checks table
+                    if is_floating_check and pay_method == "Check":
+                        c.execute("""
+                            INSERT INTO floating_checks 
+                            (voucher_no, supplier_name, check_no, amount, voucher_date, check_date, status, bank_account_code, project_name, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, 'Floating', ?, ?, ?)
+                        """, (cv_input.strip(), supplier_name, cheque_no_input.strip(), total_amt, current_time, c_date_str, selected_bank_code, project_name, current_time))
     
                     conn.commit()
                     st.success(f"🎉 Voucher {cv_input.strip()} recorded successfully!")
@@ -2910,6 +2925,78 @@ elif role == "Accounting":
                     
                 except Exception as e:
                     st.error(f"❌ Database Error: {e}")
+    
+        # ====================================================
+        # --- FLOATING CHECKS & PDC REGISTER ---
+        st.markdown("---")
+        st.subheader("📑 Floating & Post-Dated Check Register")
+    
+        floating_df = pd.read_sql_query("""
+            SELECT id, voucher_no AS 'Voucher', supplier_name AS 'Payee', check_no AS 'Check No.', 
+                   amount AS 'Amount', voucher_date AS 'Voucher Date', status AS 'Status', 
+                   bank_account_code AS 'Bank Code', project_name AS 'Project'
+            FROM floating_checks
+            WHERE status = 'Floating'
+            ORDER BY id DESC
+        """, conn)
+    
+        if not floating_df.empty:
+            st.warning(f"⚠️ You have {len(floating_df)} floating / open-dated check(s) pending bank encashment.")
+            st.dataframe(
+                floating_df.style.format({"Amount": "₱{:,.2f}"}),
+                use_container_width=True,
+                hide_index=True
+            )
+    
+            with st.expander("✅ Clear / Release Floating Check"):
+                fc_options = [f"{r['Voucher']} - {r['Payee']} (₱{r['Amount']:,.2f})" for _, r in floating_df.iterrows()]
+                sel_fc_str = st.selectbox("Select Floating Check to Clear", fc_options)
+                sel_fc_voucher = sel_fc_str.split(" - ")[0]
+                fc_row = floating_df[floating_df['Voucher'] == sel_fc_voucher].iloc[0]
+    
+                col_fc1, col_fc2 = st.columns(2)
+                actual_check_no = col_fc1.text_input("Final Check No.", value=str(fc_row['Check No.'] or ''))
+                actual_clear_date = col_fc2.date_input("Encashment / Clearance Date", value=datetime.now().date())
+    
+                if st.button("🏦 Mark Check as Cleared (Deduct from Bank in GL)", type="primary"):
+                    try:
+                        now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        clear_dt_str = actual_clear_date.strftime('%Y-%m-%d')
+    
+                        # Lookup Bank Account Name
+                        bank_names = {"10100": "Petty Cash Fund", "10310": "Cash in Bank MBTC", "10320": "Cash in Bank CHINA", "10330": "Cash in Bank BDO", "10340": "Cash in Bank Landbank"}
+                        target_bank_name = bank_names.get(fc_row['Bank Code'], "Cash in Bank")
+    
+                        # Step 2 Posting: Debit 20200 Checks Payable, Credit 103xx Cash in Bank
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                            VALUES (?, ?, '20200', 'Checks Payable / PDC Issued', ?, 0.0, ?, ?, ?)
+                        """, (now_ts, fc_row['Voucher'], fc_row['Amount'], fc_row['Voucher'], f"Cleared floating check {fc_row['Voucher']}", fc_row['Project']))
+    
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                            VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
+                        """, (now_ts, fc_row['Voucher'], fc_row['Bank Code'], target_bank_name, fc_row['Amount'], fc_row['Voucher'], f"Bank encashment for check {actual_check_no}", fc_row['Project']))
+    
+                        # Update floating_checks status
+                        c.execute("""
+                            UPDATE floating_checks 
+                            SET status = 'Cleared', check_no = ?, check_date = ? 
+                            WHERE id = ?
+                        """, (actual_check_no.strip(), clear_dt_str, int(fc_row['id'])))
+    
+                        # Update deliveries or requests cheque_date for PDF printing
+                        c.execute("UPDATE deliveries SET cheque_no = ?, cheque_date = ? WHERE cv_number = ?", (actual_check_no.strip(), clear_dt_str, fc_row['Voucher']))
+                        c.execute("UPDATE requests SET cheque_no = ?, cheque_date = ? WHERE cv_number = ?", (actual_check_no.strip(), clear_dt_str, fc_row['Voucher']))
+    
+                        conn.commit()
+                        st.success(f"🎉 Check {fc_row['Voucher']} successfully cleared and debited from {target_bank_name} in GL!")
+                        st.rerun()
+    
+                    except Exception as e:
+                        st.error(f"❌ Error clearing check: {e}")
+        else:
+            st.success("🎉 No floating or un-encashed open checks pending.")
     
         # ====================================================
         st.markdown("---")
@@ -3019,27 +3106,22 @@ elif role == "Accounting":
                     
                     if st.button(f"🔥 Reset & Delete Voucher {selected_del_cv}", type="primary"):
                         try:
-                            c.execute("""
-                                UPDATE deliveries 
-                                SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, 
-                                    payment_method = NULL, cheque_no = NULL, cheque_date = NULL 
-                                WHERE cv_number = ?
-                            """, (selected_del_cv,))
+                            c.execute("UPDATE deliveries SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, payment_method = NULL, cheque_no = NULL, cheque_date = NULL WHERE cv_number = ?", (selected_del_cv,))
                         except Exception:
                             pass
                         
                         try:
-                            c.execute("""
-                                UPDATE requests 
-                                SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, 
-                                    payment_method = NULL, cheque_no = NULL, cheque_date = NULL 
-                                WHERE cv_number = ?
-                            """, (selected_del_cv,))
+                            c.execute("UPDATE requests SET payment_status = 'Unpaid', cv_number = NULL, cv_date = NULL, payment_method = NULL, cheque_no = NULL, cheque_date = NULL WHERE cv_number = ?", (selected_del_cv,))
                         except Exception:
                             pass
                         
                         try:
                             c.execute("DELETE FROM journal_entries WHERE voucher_no = ?", (selected_del_cv,))
+                        except Exception:
+                            pass
+    
+                        try:
+                            c.execute("DELETE FROM floating_checks WHERE voucher_no = ?", (selected_del_cv,))
                         except Exception:
                             pass
                         
@@ -3048,7 +3130,7 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
-    # ==========================================================================================
+    #==============================================================================================            
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
