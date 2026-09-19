@@ -127,44 +127,48 @@ def amount_to_words(amount):
     else:
         return f"{words_str} {currency}"
 #===========================================================
-def generate_voucher_number(c, col_name, prefix):
-    """Generates a strictly unique voucher number across all accounting tables."""
-    numbers = []
+def generate_voucher_number(cursor, col_name, prefix):
+    existing_numbers = []
     
-    # Check journal entries
+    # 1. Scan journal_entries
     try:
-        res = c.execute(f"SELECT voucher_no FROM journal_entries WHERE voucher_no LIKE '{prefix}-%'").fetchall()
-        for r in res:
-            try:
-                numbers.append(int(r[0].split('-')[-1]))
-            except Exception:
-                pass
+        res = cursor.execute("SELECT DISTINCT voucher_no FROM journal_entries WHERE voucher_no LIKE ?", (f"{prefix}-%",)).fetchall()
+        existing_numbers.extend([r[0] for r in res if r[0]])
     except Exception:
         pass
 
-    # Check deliveries
+    # 2. Scan deliveries
     try:
-        res = c.execute(f"SELECT {col_name} FROM deliveries WHERE {col_name} LIKE '{prefix}-%'").fetchall()
-        for r in res:
-            try:
-                numbers.append(int(r[0].split('-')[-1]))
-            except Exception:
-                pass
+        res = cursor.execute("SELECT DISTINCT cv_number FROM deliveries WHERE cv_number LIKE ?", (f"{prefix}-%",)).fetchall()
+        existing_numbers.extend([r[0] for r in res if r[0]])
     except Exception:
         pass
 
-    # Check requests
+    # 3. Scan requests
     try:
-        res = c.execute(f"SELECT cv_number FROM requests WHERE cv_number LIKE '{prefix}-%'").fetchall()
-        for r in res:
-            try:
-                numbers.append(int(r[0].split('-')[-1]))
-            except Exception:
-                pass
+        res = cursor.execute("SELECT DISTINCT cv_number FROM requests WHERE cv_number LIKE ?", (f"{prefix}-%",)).fetchall()
+        existing_numbers.extend([r[0] for r in res if r[0]])
     except Exception:
         pass
 
-    next_num = max(numbers) + 1 if numbers else 1
+    # 4. Scan floating_checks
+    try:
+        res = cursor.execute("SELECT DISTINCT voucher_no FROM floating_checks WHERE voucher_no LIKE ?", (f"{prefix}-%",)).fetchall()
+        existing_numbers.extend([r[0] for r in res if r[0]])
+    except Exception:
+        pass
+
+    # Extract maximum numeric sequence
+    max_num = 0
+    for v_no in existing_numbers:
+        try:
+            num_part = int(str(v_no).split('-')[-1])
+            if num_part > max_num:
+                max_num = num_part
+        except (ValueError, IndexError):
+            pass
+            
+    next_num = max_num + 1
     return f"{prefix}-{next_num:05d}"
 #=================================================================    
 
