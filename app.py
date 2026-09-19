@@ -2647,7 +2647,7 @@ elif role == "Accounting":
         else:
             st.info("No generated APVs available for printing yet.")
 
-    #==========================================================================================
+    # ==========================================================================================
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV & PCV) ---
     with tab_payment:
         st.write("### 💳 Outstanding Payables & AP Aging Summary")
@@ -2833,9 +2833,21 @@ elif role == "Accounting":
             suggested_cv = generate_voucher_number(c, "cv_number", prefix)
             cv_input = col3.text_input("Voucher Number Sequence", value=suggested_cv, key=f"cv_inp_{prefix}_{suggested_cv}")
     
+            # --- Dynamic Label based on Payment Mode ---
+            if pay_basis == "Advance PDC / Downpayment (PO Basis)":
+                date_label = "📆 PDC Maturity / Cheque Date"
+            elif pay_basis == "Petty Cash / Direct Expense Liquidation (Non-PO)":
+                date_label = "📅 Liquidation / Expense Date"
+            else:
+                date_label = "📅 Cheque / Disbursement Date"
+
             col_d1, col_d2 = st.columns(2)
             cheque_no_input = col_d1.text_input("Cheque/OR Ref Number (Optional)", value="")
-            cheque_date_input = col_d2.date_input("Disbursement Date", value=datetime.now().date())
+            cheque_date_input = col_d2.date_input(
+                date_label, 
+                value=datetime.now().date(),
+                key=f"chk_date_{pay_basis.replace(' ', '_')}"
+            )
     
             st.info(f"""
             💡 **Accounting Entry Preview:**
@@ -3036,7 +3048,7 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
-    #==========================================================================================
+    # ==========================================================================================
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
