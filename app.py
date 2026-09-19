@@ -129,9 +129,26 @@ def amount_to_words(amount):
 #===========================================================
 import re
 
-def generate_voucher_number(conn, prefix):
+def generate_voucher_number(db_obj, arg2, arg3=None):
+    """
+    Flexible Voucher Sequence Generator.
+    Supports both signatures:
+      - generate_voucher_number(conn, prefix)
+      - generate_voucher_number(c, col_name, prefix)
+    """
+    # Determine the prefix from either 2nd or 3rd argument
+    prefix = arg3 if arg3 is not None else arg2
+
+    # Safely obtain a cursor or use existing cursor
+    if hasattr(db_obj, 'cursor'):
+        try:
+            cur = db_obj.cursor()
+        except Exception:
+            cur = db_obj
+    else:
+        cur = db_obj
+
     existing_numbers = []
-    
     queries = [
         ("journal_entries", "voucher_no"),
         ("deliveries", "cv_number"),
@@ -139,24 +156,20 @@ def generate_voucher_number(conn, prefix):
         ("floating_checks", "voucher_no")
     ]
     
-    # Use a fresh cursor directly from conn to avoid shared cursor lock issues
-    cur = conn.cursor()
-    
     for table, col in queries:
         try:
-            # Fetch all non-null values for the column
-            rows = cur.execute(f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''").fetchall()
+            sql = f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''"
+            rows = cur.execute(sql).fetchall()
             for r in rows:
-                val = str(r[0]).strip()
-                # Check if the string starts with the prefix (e.g. 'CV')
-                if val.upper().startswith(prefix.upper()):
-                    existing_numbers.append(val)
+                if r and r[0]:
+                    val = str(r[0]).strip()
+                    if val.upper().startswith(str(prefix).upper()):
+                        existing_numbers.append(val)
         except Exception:
             pass
 
     max_num = 0
     for v_no in existing_numbers:
-        # Extract numeric trailing digits using regex
         digits = re.findall(r'\d+', v_no)
         if digits:
             try:
