@@ -127,47 +127,45 @@ def amount_to_words(amount):
     else:
         return f"{words_str} {currency}"
 #===========================================================
-def generate_voucher_number(cursor, col_name, prefix):
+import re
+
+def generate_voucher_number(conn, prefix):
     existing_numbers = []
     
-    # 1. Scan journal_entries
-    try:
-        res = cursor.execute("SELECT DISTINCT voucher_no FROM journal_entries WHERE voucher_no LIKE ?", (f"{prefix}-%",)).fetchall()
-        existing_numbers.extend([r[0] for r in res if r[0]])
-    except Exception:
-        pass
+    queries = [
+        ("journal_entries", "voucher_no"),
+        ("deliveries", "cv_number"),
+        ("requests", "cv_number"),
+        ("floating_checks", "voucher_no")
+    ]
+    
+    # Use a fresh cursor directly from conn to avoid shared cursor lock issues
+    cur = conn.cursor()
+    
+    for table, col in queries:
+        try:
+            # Fetch all non-null values for the column
+            rows = cur.execute(f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''").fetchall()
+            for r in rows:
+                val = str(r[0]).strip()
+                # Check if the string starts with the prefix (e.g. 'CV')
+                if val.upper().startswith(prefix.upper()):
+                    existing_numbers.append(val)
+        except Exception:
+            pass
 
-    # 2. Scan deliveries
-    try:
-        res = cursor.execute("SELECT DISTINCT cv_number FROM deliveries WHERE cv_number LIKE ?", (f"{prefix}-%",)).fetchall()
-        existing_numbers.extend([r[0] for r in res if r[0]])
-    except Exception:
-        pass
-
-    # 3. Scan requests
-    try:
-        res = cursor.execute("SELECT DISTINCT cv_number FROM requests WHERE cv_number LIKE ?", (f"{prefix}-%",)).fetchall()
-        existing_numbers.extend([r[0] for r in res if r[0]])
-    except Exception:
-        pass
-
-    # 4. Scan floating_checks
-    try:
-        res = cursor.execute("SELECT DISTINCT voucher_no FROM floating_checks WHERE voucher_no LIKE ?", (f"{prefix}-%",)).fetchall()
-        existing_numbers.extend([r[0] for r in res if r[0]])
-    except Exception:
-        pass
-
-    # Extract maximum numeric sequence
     max_num = 0
     for v_no in existing_numbers:
-        try:
-            num_part = int(str(v_no).split('-')[-1])
-            if num_part > max_num:
-                max_num = num_part
-        except (ValueError, IndexError):
-            pass
-            
+        # Extract numeric trailing digits using regex
+        digits = re.findall(r'\d+', v_no)
+        if digits:
+            try:
+                num = int(digits[-1])
+                if num > max_num:
+                    max_num = num
+            except ValueError:
+                pass
+
     next_num = max_num + 1
     return f"{prefix}-{next_num:05d}"
 #=================================================================    
@@ -2834,7 +2832,8 @@ elif role == "Accounting":
             selected_bank_code = bank_choice.split("]")[0].replace("[", "")
             selected_bank_name = bank_choice.split("]")[1].strip()
             
-            suggested_cv = generate_voucher_number(c, "cv_number", prefix)
+            #suggested_cv = generate_voucher_number(c, "cv_number", prefix)
+            suggested_cv = generate_voucher_number(conn, prefix)
             cv_input = col3.text_input("Voucher Number Sequence", value=suggested_cv, key=f"cv_inp_{prefix}_{suggested_cv}")
     
             # --- Dynamic Date & Floating Check Toggle ---
