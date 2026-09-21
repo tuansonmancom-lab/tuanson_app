@@ -2785,13 +2785,23 @@ elif role == "Accounting":
                     else:
                         st.warning("⚠️ Please provide both an Account Code and Account Name.")
 
-        df_coa = pd.read_sql_query("""
-            SELECT account_code AS 'Account Code', account_name AS 'Account Name', 
-                   account_type AS 'Account Type', status AS 'Status'
+        #===================================
+        # Replace lines 2788 to 2793 with this:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT account_code, account_name, account_type, status
             FROM chart_of_accounts
             ORDER BY account_code ASC
-        """, conn)
+        """)
+        rows = c.fetchall()
         
+        # Recreate the DataFrame with your exact column names
+        df_coa = pd.DataFrame(
+            rows, 
+            columns=['Account Code', 'Account Name', 'Account Type', 'Status']
+        )
+        #===================================
         if not df_coa.empty:
             st.dataframe(df_coa, use_container_width=True, hide_index=True)
         else:
