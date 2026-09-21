@@ -31,7 +31,7 @@ def render_bank_reconciliation_tab(conn):
     selected_account_str = col_f1.selectbox("Select Bank Account", options=account_options)
     selected_acct_code = selected_account_str.split("]")[0].replace("[", "").strip()
 
-    # Date Period Selection with safety for mid-selection inputs
+    # Date Period Selection
     today = date.today()
     first_day_curr_month = date(today.year, today.month, 1)
     
@@ -47,9 +47,11 @@ def render_bank_reconciliation_tab(conn):
         elif len(date_range) == 1:
             from_date = to_date = date_range[0]
         else:
-            from_date, to_date = first_day_curr_month, today
-    else:
+            from_date = to_date = today
+    elif isinstance(date_range, date):
         from_date = to_date = date_range
+    else:
+        from_date = to_date = today
 
     to_date_str = to_date.strftime('%Y-%m-%d') if hasattr(to_date, 'strftime') else str(to_date)
 
@@ -67,19 +69,19 @@ def render_bank_reconciliation_tab(conn):
     gl_balance_row = c.execute("""
         SELECT SUM(debit) - SUM(credit) 
         FROM journal_entries 
-        WHERE account_code = ? AND DATE(entry_date) <= ?
-    """, [selected_acct_code, to_date_str]).fetchone()
+        WHERE account_code = ? AND entry_date <= ?
+    """, (selected_acct_code, to_date_str)).fetchone()
     
-    gl_book_balance = float(gl_balance_row[0]) if gl_balance_row and gl_balance_row[0] else 0.0
+    gl_book_balance = float(gl_balance_row[0]) if gl_balance_row and gl_balance_row[0] is not None else 0.0
 
     # --- 3. FETCH UNCLEARED / OUTSTANDING CHECKS ---
     uncleared_checks = c.execute("""
         SELECT id, voucher_no, check_no, check_date, payee, amount, status 
         FROM floating_checks 
         WHERE (status = 'Pending' OR status = 'Un-encashed' OR status IS NULL OR status = '')
-          AND (DATE(check_date) <= ? OR check_date IS NULL OR check_date = '')
+          AND (check_date <= ? OR check_date IS NULL OR check_date = '')
         ORDER BY check_date ASC
-    """, [to_date_str]).fetchall()
+    """, (to_date_str,)).fetchall()
 
     df_checks = pd.DataFrame(uncleared_checks, columns=["ID", "Voucher No", "Check No", "Issue Date", "Payee / Supplier", "Amount (₱)", "Status"])
     
@@ -113,10 +115,10 @@ def render_bank_reconciliation_tab(conn):
         )
         
         cleared_rows = edited_df[edited_df["Mark Cleared"] == True]
-        total_cleared_amt = float(cleared_rows["Amount (₱)"].sum())
+        total_cleared_amt = float(cleared_rows["Amount (₱)"].sum()) if not cleared_rows.empty else 0.0
         
         remaining_outstanding_rows = edited_df[edited_df["Mark Cleared"] == False]
-        total_outstanding_amt = float(remaining_outstanding_rows["Amount (₱)"].sum())
+        total_outstanding_amt = float(remaining_outstanding_rows["Amount (₱)"].sum()) if not remaining_outstanding_rows.empty else 0.0
     else:
         st.info("ℹ️ No pending or outstanding checks found for this account within the selected period.")
         total_cleared_amt = 0.0
@@ -156,17 +158,17 @@ def render_bank_reconciliation_tab(conn):
                         UPDATE floating_checks 
                         SET status = 'Cleared', cleared_at = ? 
                         WHERE id = ?
-                    """, [cleared_date_str, row["ID"]])
+                    """, (cleared_date_str, row["ID"]))
 
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, '20200', 'Checks Payable / PDC Issued', ?, 0.0, ?, ?, '')
-                    """, [cleared_date_str, v_no, amt, f"Passbook Cleared - Chk #{row['Check No']}"])
+                    """, (cleared_date_str, v_no, amt, f"Passbook Cleared - Chk #{row['Check No']}"))
 
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, '')
-                    """, [cleared_date_str, v_no, selected_acct_code, selected_account_str, amt, f"Passbook Cleared - Chk #{row['Check No']}"])
+                    """, (cleared_date_str, v_no, selected_acct_code, selected_account_str, amt, f"Passbook Cleared - Chk #{row['Check No']}"))
 
                 conn.commit()
                 st.success(f"🎉 Successfully marked {len(cleared_rows)} check(s) as Cleared!")
