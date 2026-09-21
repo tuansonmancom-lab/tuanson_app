@@ -822,7 +822,13 @@ def init_db():
 
     conn.commit()
 
-init_db()
+# Replace line 825 with this guarded call:
+if "db_initialized" not in st.session_state:
+    try:
+        init_db()
+        st.session_state["db_initialized"] = True
+    except Exception as e:
+        st.warning(f"Database initialization check skipped: {e}")
 #===============================database
 # --- HELPER FUNCTIONS ---
 def get_latest_item_balance(cursor, item_name):
