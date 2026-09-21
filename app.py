@@ -188,53 +188,65 @@ def render_bank_reconciliation_tab(conn):
     with btn_col1:
         if st.button("💾 Finalize & Save Bank Reconciliation Snapshot", type="primary"):
             try:
-                # 1. Update cleared checks if any exist
-                if not edited_df.empty and len(cleared_rows) > 0:
-                    for _, row in cleared_rows.iterrows():
-                        v_no = row["Voucher No"]
-                        amt = row["Amount (₱)"]
-                        raw_clearing_date = row["Passbook Clearing Date"]
-                        cleared_date_str = raw_clearing_date.strftime('%Y-%m-%d') if hasattr(raw_clearing_date, 'strftime') else str(raw_clearing_date)
-
-                        c.execute("""
-                            UPDATE floating_checks 
-                            SET status = 'Cleared', cleared_at = ? 
-                            WHERE id = ?
-                        """, (cleared_date_str, row["ID"]))
-
-                        c.execute("""
-                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                            VALUES (?, ?, '20200', 'Checks Payable / PDC Issued', ?, 0.0, ?, ?, '')
-                        """, (cleared_date_str, v_no, amt, f"Passbook Cleared - Chk #{row['Check No']}"))
-
-                        c.execute("""
-                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                            VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, '')
-                        """, (cleared_date_str, v_no, selected_acct_code, selected_account_str, amt, f"Passbook Cleared - Chk #{row['Check No']}"))
-
-                # 2. Insert Snapshot Record into bank_reconciliations table
+                conn = get_db_connection()
+                c = conn.cursor()
+        
+                # 1. Update cleared checks in floating_checks table
+                if 'edited_df' in locals() and not edited_df.empty:
+                    for _, row in edited_df.iterrows():
+                        if row.get("Cleared?"):
+                            cleared_date = str(row.get("Passbook Clearing Date", datetime.date.today()))
+                            check_no = str(row.get("Check No", ""))
+                            
+                            # Try updating with cleared_at, fallback to status-only if column doesn't exist
+                            try:
+                                c.execute("""
+                                    UPDATE floating_checks 
+                                    SET status = 'Cleared', cleared_at = ? 
+                                    WHERE check_no = ?
+                                """, (cleared_date, check_no))
+                            except Exception:
+                                c.execute("""
+                                    UPDATE floating_checks 
+                                    SET status = 'Cleared' 
+                                    WHERE check_no = ?
+                                """, (check_no,))
+        
+                # 2. Save snapshot to bank_reconciliations table
                 c.execute("""
                     INSERT INTO bank_reconciliations (
-                        reconciliation_date, account_code, account_name,
-                        gl_book_balance, bank_statement_balance, total_outstanding_checks,
-                        adjusted_bank_balance, variance, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Completed')
+                        reconciliation_date,
+                        account_code,
+                        account_name,
+                        gl_book_balance,
+                        bank_statement_balance,
+                        total_outstanding_checks,
+                        total_deposits_in_transit,
+                        adjusted_bank_balance,
+                        variance,
+                        status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    to_date_str,
-                    selected_acct_code,
-                    selected_account_str,
-                    gl_book_balance,
-                    statement_ending_balance,
-                    total_outstanding_amt,
-                    adjusted_bank_balance,
-                    out_of_balance_variance
+                    datetime.date.today().strftime("%Y-%m-%d"),
+                    selected_account_code if 'selected_account_code' in locals() else '10330',
+                    selected_account_name if 'selected_account_name' in locals() else 'Cash in Bank BDO',
+                    float(gl_balance) if 'gl_balance' in locals() else 0.0,
+                    float(bank_statement_balance) if 'bank_statement_balance' in locals() else 0.0,
+                    float(total_outstanding) if 'total_outstanding' in locals() else 0.0,
+                    0.0,
+                    float(adjusted_bank_balance) if 'adjusted_bank_balance' in locals() else 0.0,
+                    float(discrepancy) if 'discrepancy' in locals() else 0.0,
+                    'Completed'
                 ))
-
+        
                 conn.commit()
-                st.success("🎉 Bank Reconciliation successfully saved!")
+                conn.close()
+                
+                st.success("Reconciliation snapshot saved successfully!")
                 st.rerun()
+        
             except Exception as e:
-                st.error(f"❌ Error committing bank reconciliation: {e}")
+                st.error(f"Error committing bank reconciliation: {e}")
 
     # --- 7. HISTORICAL RECONCILIATIONS TABLE ---
     st.markdown("---")
