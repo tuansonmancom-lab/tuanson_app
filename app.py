@@ -2653,6 +2653,48 @@ elif role == "Accounting":
 
     # ==========================================================================================
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV, PCV & FLOATING CHECKS) ---
+    #===============================================================
+    # --- AUTOMATIC SETTLEMENT OF APVs WITH ADVANCE PDCs ---
+    try:
+        # Find APVs where the PO was already paid via Advance PDC/Downpayment
+        prepaid_apvs = c.execute("""
+            SELECT d.apv_number, d.total_amount, d.supplier, d.project_name, d.pono, r.cv_number
+            FROM deliveries d
+            JOIN requests r ON d.pono = r.pono
+            WHERE (d.payment_status = 'Unpaid' OR d.payment_status IS NULL)
+              AND d.apv_number IS NOT NULL AND d.apv_number != ''
+              AND r.payment_status = 'Paid'
+              AND r.cv_number IS NOT NULL AND r.cv_number != ''
+        """).fetchall()
+    
+        for apv_no, amt, supplier, proj, po_no, existing_cv in prepaid_apvs:
+            now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # 1. Mark delivery APV as Paid (Applied via Advance)
+            c.execute("""
+                UPDATE deliveries 
+                SET payment_status = 'Paid (Applied Advance)', 
+                    cv_number = ?, 
+                    cv_date = ? 
+                WHERE apv_number = ?
+            """, (existing_cv, now_ts, apv_no))
+    
+            # 2. Post Offsetting General Ledger Entry (20100 AP Trade vs 10500 Advances)
+            c.execute("""
+                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                VALUES (?, ?, '20100', 'Accounts Payable-Trade', ?, 0.0, ?, ?, ?)
+            """, (now_ts, existing_cv, amt, apv_no, f"Applied Advance ({existing_cv}) to APV {apv_no}", proj))
+    
+            c.execute("""
+                INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                VALUES (?, ?, '10500', ?, 0.0, ?, ?, ?, ?)
+            """, (now_ts, existing_cv, f"Advances to Suppliers - {supplier}", amt, apv_no, f"Settled Advance for APV {apv_no}", proj))
+    
+        if prepaid_apvs:
+            conn.commit()
+    except Exception as e:
+        pass
+    #===============================================================
     with tab_payment:
         st.write("### 💳 Outstanding Payables & AP Aging Summary")
         
