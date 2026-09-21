@@ -3089,11 +3089,15 @@ elif role == "Accounting":
                 issued_cvs.append(record)
     
         issued_cvs.sort(key=lambda x: str(x[1] or ''), reverse=True)
-        #=============================================================
+        # =============================================================
         if issued_cvs and HAS_REPORTLAB:
             for idx, cv in enumerate(issued_cvs):
                 cv_no, cv_date, apv_no, supplier, pay_method, total_amt, c_num, c_date = cv
                 
+                # Fetch existing purchase discount for this voucher if previously saved
+                existing_disc_row = c.execute("SELECT credit FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,)).fetchone()
+                init_discount_amt = float(existing_disc_row[0]) if existing_disc_row and existing_disc_row[0] else 0.0
+
                 st.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier/Payee:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
                 
                 col_btn1, col_btn2 = st.columns(2)
@@ -3107,7 +3111,7 @@ elif role == "Accounting":
                     key=f"print_pv_{cv_no}_{idx}"
                 )
                 
-                cheque_pdf = create_cheque_pdf(supplier, total_amt, c_date)
+                cheque_pdf = create_cheque_pdf(supplier, total_amt - init_discount_amt, c_date)
                 col_btn2.download_button(
                     label="🎟️ Print Cheque (A4)",
                     data=cheque_pdf,
@@ -3116,23 +3120,33 @@ elif role == "Accounting":
                     key=f"print_chk_{cv_no}_{idx}"
                 )
 
-                # --- ✏️ FULL INLINE EDIT TOOL (Amount, Check No, Check Date) ---
+                # --- ✏️ FULL INLINE EDIT TOOL (Amount, Discount, Check No, Check Date) ---
                 with st.expander(f"⚙️ Options / Edit Details for {cv_no}"):
                     col_e1, col_e2, col_e3 = st.columns(3)
                     
                     new_voucher_amt = col_e1.number_input(
-                        "Total Amount (₱)", 
+                        "Gross Payable Amount (₱)", 
                         min_value=0.01, 
                         value=float(total_amt), 
                         step=100.0, 
                         key=f"edit_amt_val_{cv_no}_{idx}"
                     )
+
+                    discount_amt = col_e2.number_input(
+                        "Discount / Rebate (₱)", 
+                        min_value=0.0, 
+                        value=init_discount_amt, 
+                        step=50.0, 
+                        key=f"edit_disc_val_{cv_no}_{idx}"
+                    )
                     
-                    new_check_no = col_e2.text_input(
+                    new_check_no = col_e3.text_input(
                         "Cheque / Ref Number", 
                         value=str(c_num or ''), 
                         key=f"edit_chk_no_{cv_no}_{idx}"
                     )
+
+                    col_e4, col_e5 = st.columns(2)
 
                     # Safely parse current check date for date picker default
                     try:
@@ -3140,55 +3154,82 @@ elif role == "Accounting":
                     except Exception:
                         init_date = datetime.now().date()
 
-                    new_check_date = col_e3.date_input(
+                    new_check_date = col_e4.date_input(
                         "Cheque Date", 
                         value=init_date, 
                         key=f"edit_chk_dt_{cv_no}_{idx}"
                     )
                     
-                    is_blank_dt = st.checkbox(
+                    is_blank_dt = col_e5.checkbox(
                         "🎟️ Keep Cheque Date Blank (Open Date / Floating)", 
                         value=(not bool(c_date)), 
                         key=f"blank_dt_{cv_no}_{idx}"
                     )
 
+                    net_disbursement = max(0.0, new_voucher_amt - discount_amt)
+                    
+                    if discount_amt > 0:
+                        st.info(f"💡 **Net Disbursement:** ₱{net_disbursement:,.2f} *(Check amount disburse after ₱{discount_amt:,.2f} discount)*")
+
                     if st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{idx}", type="primary"):
                         try:
                             formatted_chk_date = "" if is_blank_dt else new_check_date.strftime('%Y-%m-%d')
                             
-                            # 1. Update Journal Entries (Debit and Credit amounts)
+                            # 1. Update Debit side (Clears full Gross Payable)
                             c.execute("UPDATE journal_entries SET debit = ? WHERE voucher_no = ? AND debit > 0", (new_voucher_amt, cv_no))
-                            c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND credit > 0", (new_voucher_amt, cv_no))
                             
-                            # 2. Update Deliveries table
+                            # 2. Update Credit side for Cash / Bank / PDC Issued (Net Check Amount)
+                            c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND credit > 0 AND account_code != '50200'", (net_disbursement, cv_no))
+                            
+                            # 3. Manage 50200 Purchase Discounts account
+                            has_disc_entry = c.execute("SELECT COUNT(*) FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,)).fetchone()[0] > 0
+
+                            if discount_amt > 0:
+                                if has_disc_entry:
+                                    c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND account_code = '50200'", (discount_amt, cv_no))
+                                else:
+                                    existing_ref = c.execute("SELECT ref_no, project_name FROM journal_entries WHERE voucher_no = ? LIMIT 1", (cv_no,)).fetchone()
+                                    ref_val = existing_ref[0] if existing_ref else cv_no
+                                    proj_val = existing_ref[1] if existing_ref else ""
+                                    now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                                    c.execute("""
+                                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                                        VALUES (?, ?, '50200', 'Purchase Discounts', 0.0, ?, ?, ?, ?)
+                                    """, (now_ts, cv_no, discount_amt, ref_val, f"Purchase discount applied for {cv_no}", proj_val))
+                            else:
+                                if has_disc_entry:
+                                    c.execute("DELETE FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,))
+
+                            # 4. Update Deliveries table (Gross APV amount preserved)
                             c.execute("""
                                 UPDATE deliveries 
                                 SET total_amount = ?, cheque_no = ?, cheque_date = ? 
                                 WHERE cv_number = ?
                             """, (new_voucher_amt, new_check_no.strip(), formatted_chk_date, cv_no))
                             
-                            # 3. Update Requests table
+                            # 5. Update Requests table
                             c.execute("""
                                 UPDATE requests 
                                 SET amount = ?, cheque_no = ?, cheque_date = ? 
                                 WHERE cv_number = ?
                             """, (new_voucher_amt, new_check_no.strip(), formatted_chk_date, cv_no))
                             
-                            # 4. Update Floating Checks register
+                            # 6. Update Floating Checks register (Check is issued for Net Amount)
                             c.execute("""
                                 UPDATE floating_checks 
                                 SET amount = ?, check_no = ?, check_date = ? 
                                 WHERE voucher_no = ?
-                            """, (new_voucher_amt, new_check_no.strip(), formatted_chk_date, cv_no))
+                            """, (net_disbursement, new_check_no.strip(), formatted_chk_date, cv_no))
                             
                             conn.commit()
-                            st.success(f"🎉 Updated {cv_no} details (Amount: ₱{new_voucher_amt:,.2f}, Check No: {new_check_no or 'N/A'}, Date: {formatted_chk_date or 'Blank'}) across all records!")
+                            st.success(f"🎉 Updated {cv_no} details! Gross: ₱{new_voucher_amt:,.2f}, Discount: ₱{discount_amt:,.2f}, Net Check: ₱{net_disbursement:,.2f}")
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ Error updating voucher details: {e}")
 
                 st.markdown("---")
-        #=============================================================
+        # =============================================================
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
     
