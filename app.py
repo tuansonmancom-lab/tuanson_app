@@ -1749,16 +1749,6 @@ if st.sidebar.button("🚪 Logout"):
 
 st.sidebar.markdown("---")
 
-#==========================================
-# Pass the database connection object
-if "db_initialized" not in st.session_state:
-    try:
-        init_db(conn)
-        st.session_state["db_initialized"] = True
-    except Exception as e:
-        st.warning(f"Database initialization check skipped: {e}")
-#==========================================
-
 if not st.session_state.available_roles:
     st.warning("You have no roles assigned. Please contact the Admin.")
     st.stop()
