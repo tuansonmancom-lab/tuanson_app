@@ -600,8 +600,7 @@ def init_db():
                 qty REAL DEFAULT 1.0,
                 unit TEXT DEFAULT 'lot',
                 contract_amount REAL DEFAULT 0.0,
-                FOREIGN KEY(project_id) REFERENCES projects(id))'''
-              )
+                FOREIGN KEY(project_id) REFERENCES projects(id))''')
 
     # 3. Materials Master Table
     c.execute('''CREATE TABLE IF NOT EXISTS materials (
@@ -734,6 +733,24 @@ def init_db():
         )
     ''')
 
+    # 12. Bank Reconciliations Table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS bank_reconciliations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reconciliation_date TEXT NOT NULL,
+            account_code TEXT NOT NULL,
+            account_name TEXT NOT NULL,
+            gl_book_balance REAL NOT NULL,
+            bank_statement_balance REAL NOT NULL,
+            total_outstanding_checks REAL NOT NULL,
+            total_deposits_in_transit REAL DEFAULT 0.0,
+            adjusted_bank_balance REAL NOT NULL,
+            variance REAL DEFAULT 0.0,
+            status TEXT DEFAULT 'Completed',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
         try:
@@ -843,8 +860,15 @@ def init_db():
         ])
 
     conn.commit()
+    conn.close()
 
-init_db()
+# Run DB initialization once per app session start
+if "db_initialized" not in st.session_state:
+    try:
+        init_db()
+        st.session_state["db_initialized"] = True
+    except Exception as e:
+        st.warning(f"Database initialization check skipped: {e}")
 
 # --- HELPER FUNCTIONS ---
 def get_latest_item_balance(cursor, item_name):
