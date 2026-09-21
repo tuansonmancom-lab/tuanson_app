@@ -2786,22 +2786,22 @@ elif role == "Accounting":
                         st.warning("⚠️ Please provide both an Account Code and Account Name.")
 
         #===================================
-            try:
-            conn = get_db_connection()
-            c = conn.cursor()
-            c.execute("""
-                SELECT account_code, account_name, account_type, status
-                FROM chart_of_accounts
-                ORDER BY account_code ASC
-            """)
-            rows = c.fetchall()
-            df_coa = pd.DataFrame(
-                rows, 
-                columns=['Account Code', 'Account Name', 'Account Type', 'Status']
-            )
-        except Exception as e:
-            st.warning(f"Unable to load Chart of Accounts: {e}")
-            df_coa = pd.DataFrame(columns=['Account Code', 'Account Name', 'Account Type', 'Status'])
+        try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT account_code, account_name, account_type, status
+            FROM chart_of_accounts
+            ORDER BY account_code ASC
+        """)
+        rows = c.fetchall()
+        df_coa = pd.DataFrame(
+            rows, 
+            columns=['Account Code', 'Account Name', 'Account Type', 'Status']
+        )
+    except Exception as e:
+        st.warning(f"Unable to load Chart of Accounts: {e}")
+        df_coa = pd.DataFrame(columns=['Account Code', 'Account Name', 'Account Type', 'Status'])  
         #===================================
         if not df_coa.empty:
             st.dataframe(df_coa, use_container_width=True, hide_index=True)
