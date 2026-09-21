@@ -6,6 +6,40 @@ import os
 from datetime import datetime
 from io import BytesIO
 
+#===========================================================================
+def init_db(conn):
+    c = conn.cursor()
+    
+    # Execute each CREATE TABLE individually
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT UNIQUE,
+            status TEXT DEFAULT 'Active',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS bank_reconciliations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reconciliation_date TEXT NOT NULL,
+            account_code TEXT NOT NULL,
+            account_name TEXT NOT NULL,
+            gl_book_balance REAL NOT NULL,
+            bank_statement_balance REAL NOT NULL,
+            total_outstanding_checks REAL NOT NULL,
+            total_deposits_in_transit REAL DEFAULT 0.0,
+            adjusted_bank_balance REAL NOT NULL,
+            variance REAL DEFAULT 0.0,
+            status TEXT DEFAULT 'Completed',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.commit()
+#=====================================================================    
+
 #============================================================================Bank Reconciliation===============================
 import streamlit as st
 import pandas as pd
@@ -1724,6 +1758,16 @@ if st.sidebar.button("🚪 Logout"):
     st.rerun()
 
 st.sidebar.markdown("---")
+
+#==========================================
+# Pass the database connection object
+if "db_initialized" not in st.session_state:
+    try:
+        init_db(conn)
+        st.session_state["db_initialized"] = True
+    except Exception as e:
+        st.warning(f"Database initialization check skipped: {e}")
+#==========================================
 
 if not st.session_state.available_roles:
     st.warning("You have no roles assigned. Please contact the Admin.")
