@@ -8,6 +8,9 @@ from io import BytesIO
 
 #============================================================================Bank Reconciliation===============================
 def render_bank_reconciliation_tab(conn):
+    import streamlit as st
+    import pandas as pd
+    from datetime import date, datetime  # <--- MAKE SURE 'date' IS IMPORTED HERE
     c = conn.cursor()
     st.header("🏦 Bank Reconciliation Statement")
     st.caption("Reconcile General Ledger Cash in Bank balances and record official passbook clearing dates.")
