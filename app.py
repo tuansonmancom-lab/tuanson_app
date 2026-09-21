@@ -3089,7 +3089,7 @@ elif role == "Accounting":
                 issued_cvs.append(record)
     
         issued_cvs.sort(key=lambda x: str(x[1] or ''), reverse=True)
-        
+        #=============================================================
         if issued_cvs and HAS_REPORTLAB:
             for idx, cv in enumerate(issued_cvs):
                 cv_no, cv_date, apv_no, supplier, pay_method, total_amt, c_num, c_date = cv
@@ -3115,7 +3115,41 @@ elif role == "Accounting":
                     mime="application/pdf",
                     key=f"print_chk_{cv_no}_{idx}"
                 )
+
+                # --- ✏️ EDIT VOUCHER AMOUNT TOOL ---
+                with st.expander(f"⚙️ Options / Adjust Amount for {cv_no}"):
+                    col_e1, col_e2 = st.columns([2, 1])
+                    new_voucher_amt = col_e1.number_input(
+                        "New Total Amount (₱)", 
+                        min_value=0.01, 
+                        value=float(total_amt), 
+                        step=100.0, 
+                        key=f"edit_amt_val_{cv_no}_{idx}"
+                    )
+                    
+                    if col_e2.button("💾 Save New Amount", key=f"btn_save_amt_{cv_no}_{idx}", type="secondary"):
+                        try:
+                            # 1. Update Journal Entries (Debit and Credit sides)
+                            c.execute("UPDATE journal_entries SET debit = ? WHERE voucher_no = ? AND debit > 0", (new_voucher_amt, cv_no))
+                            c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND credit > 0", (new_voucher_amt, cv_no))
+                            
+                            # 2. Update Deliveries table if linked to APV
+                            c.execute("UPDATE deliveries SET total_amount = ? WHERE cv_number = ?", (new_voucher_amt, cv_no))
+                            
+                            # 3. Update Requests table if linked to PO
+                            c.execute("UPDATE requests SET amount = ? WHERE cv_number = ?", (new_voucher_amt, cv_no))
+                            
+                            # 4. Update Floating Checks register if applicable
+                            c.execute("UPDATE floating_checks SET amount = ? WHERE voucher_no = ?", (new_voucher_amt, cv_no))
+                            
+                            conn.commit()
+                            st.success(f"🎉 Updated {cv_no} total amount to ₱{new_voucher_amt:,.2f} across all GL ledgers and vouchers!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error updating amount: {e}")
+
                 st.markdown("---")
+        #=============================================================
         else:
             st.info("No issued check or payment vouchers available for printing yet.")
     
