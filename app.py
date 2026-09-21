@@ -2474,12 +2474,13 @@ elif role == "Accounting":
     if st.button("🔄 Refresh Accounting Data", key="btn_refresh_accounting"):
         st.rerun()
     
-    tab_coa, tab_apv, tab_payment, tab_gl, tab_fs = st.tabs([
+    tab_coa, tab_apv, tab_payment, tab_gl, tab_fs, tab_br = st.tabs([
         "📊 Chart of Accounts", 
         "📝 Accounts Payable Voucher (APV)", 
         "💸 Check / Payment Voucher (CV)", 
         "📖 General Ledger Entries",
         "📈 Financial Statements"
+        "🏦 Bank Reconciliation"  # <--- NEW TAB 6
     ])
     
     # --- TAB 0: CHART OF ACCOUNTS ---
@@ -3481,6 +3482,13 @@ elif role == "Accounting":
                 st.success(f"✅ Balance Check Passed: Total Assets (₱{tot_assets:,.2f}) = Liabilities + Equity (₱{tot_liab_equity:,.2f})")
             else:
                 st.error(f"⚠️ Unbalanced! Assets: ₱{tot_assets:,.2f} | Liabilities + Equity: ₱{tot_liab_equity:,.2f}")
+
+
+        #===================================================================
+        # --- TAB 6: BANK RECONCILIATION ---
+        with tab_br:
+            render_bank_reconciliation_tab(conn)
+            
 #==================================================================================
 # --- ROLE 6: ADMIN VIEW ALL ---
 elif role == "Admin View All":
@@ -3784,3 +3792,171 @@ elif role == "Admin View All":
                 except Exception as e:
                     st.error(f"❌ Error during database reset: {e}")
     #================================================================
+
+#============================================================================Bank Reconciliation===============================
+import streamlit as st
+import pandas as pd
+from datetime import datetime, date
+
+def render_bank_reconciliation_tab(conn):
+    c = conn.cursor()
+    st.header("🏦 Bank Reconciliation Statement")
+    st.caption("Reconcile General Ledger Cash in Bank balances and record official passbook clearing dates.")
+
+    # --- 1. FILTER CONTROLS ---
+    col_f1, col_f2, col_f3 = st.columns(3)
+    
+    # Fetch active Cash/Bank accounts
+    bank_accounts = c.execute("""
+        SELECT DISTINCT account_code, account_name 
+        FROM journal_entries 
+        WHERE account_code LIKE '103%' OR account_name LIKE '%Bank%' OR account_name LIKE '%Cash%'
+        ORDER BY account_code
+    """).fetchall()
+
+    account_options = [f"[{acc[0]}] {acc[1]}" for acc in bank_accounts] if bank_accounts else ["[10330] Cash in Bank BDO"]
+    selected_account_str = col_f1.selectbox("Select Bank Account", options=account_options)
+    selected_acct_code = selected_account_str.split("]")[0].replace("[", "").strip()
+
+    # Date Period Selection
+    today = date.today()
+    first_day_curr_month = date(today.year, today.month, 1)
+    
+    date_range = col_f2.date_input(
+        "Select Reconciliation Period (From - To)",
+        value=(first_day_curr_month, today),
+        key="bank_rec_date_range"
+    )
+
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        from_date, to_date = date_range
+    else:
+        from_date, to_date = first_day_curr_month, today
+
+    statement_ending_balance = col_f3.number_input(
+        "Bank Statement Ending Balance (₱)",
+        min_value=0.0,
+        value=0.0,
+        step=1000.0,
+        help="Enter the final balance shown on the bank statement for this period."
+    )
+
+    st.markdown("---")
+
+    # --- 2. CALCULATE GL BOOK BALANCE ---
+    gl_balance_row = c.execute("""
+        SELECT SUM(debit) - SUM(credit) 
+        FROM journal_entries 
+        WHERE account_code = ? AND DATE(entry_date) <= ?
+    """, (selected_acct_code, to_date.strftime('%Y-%m-%d'))).fetchone()
+    
+    gl_book_balance = float(gl_balance_row[0]) if gl_balance_row and gl_balance_row[0] else 0.0
+
+    # --- 3. FETCH UNCLEARED / OUTSTANDING CHECKS ---
+    uncleared_checks = c.execute("""
+        SELECT id, voucher_no, check_no, check_date, payee, amount, status 
+        FROM floating_checks 
+        WHERE (status = 'Pending' OR status = 'Un-encashed' OR status IS NULL OR status = '')
+          AND DATE(created_at) <= ?
+        ORDER BY check_date ASC
+    """, (to_date.strftime('%Y-%m-%d'),)).fetchall()
+
+    df_checks = pd.DataFrame(uncleared_checks, columns=["ID", "Voucher No", "Check No", "Issue Date", "Payee / Supplier", "Amount (₱)", "Status"])
+    
+    if not df_checks.empty:
+        df_checks["Mark Cleared"] = False
+        df_checks["Passbook Clearing Date"] = today  # Default clearing date picker value
+
+    # --- 4. INTERACTIVE RECONCILIATION TABLE ---
+    st.subheader("📋 Outstanding / Floating Checks")
+    st.write("Mark checks as **Cleared** and enter the **Passbook Clearing Date** as shown on your bank statement:")
+
+    if not df_checks.empty:
+        edited_df = st.data_editor(
+            df_checks,
+            column_config={
+                "ID": None,  # Hide database ID
+                "Mark Cleared": st.column_config.CheckboxColumn("Cleared?", default=False),
+                "Passbook Clearing Date": st.column_config.DateColumn(
+                    "Passbook Clearing Date",
+                    format="YYYY-MM-DD",
+                    default=today,
+                    help="Select the exact date this check was cleared per passbook/statement"
+                ),
+                "Amount (₱)": st.column_config.NumberColumn("Amount (₱)", format="₱%,.2f"),
+                "Issue Date": st.column_config.TextColumn("Issue Date"),
+            },
+            disabled=["Voucher No", "Check No", "Issue Date", "Payee / Supplier", "Amount (₱)", "Status"],
+            hide_index=True,
+            use_container_width=True,
+            key="editor_bank_rec"
+        )
+        
+        cleared_rows = edited_df[edited_df["Mark Cleared"] == True]
+        total_cleared_amt = float(cleared_rows["Amount (₱)"].sum())
+        
+        remaining_outstanding_rows = edited_df[edited_df["Mark Cleared"] == False]
+        total_outstanding_amt = float(remaining_outstanding_rows["Amount (₱)"].sum())
+    else:
+        st.info("ℹ️ No pending or outstanding checks found for this account within the selected period.")
+        total_cleared_amt = 0.0
+        total_outstanding_amt = 0.0
+        edited_df = pd.DataFrame()
+
+    # --- 5. RECONCILIATION SUMMARY CARDS ---
+    st.markdown("---")
+    st.subheader("📊 Reconciliation Summary")
+
+    adjusted_bank_balance = statement_ending_balance - total_outstanding_amt
+    out_of_balance_variance = gl_book_balance - adjusted_bank_balance
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("GL Book Balance", f"₱{gl_book_balance:,.2f}")
+    m2.metric("Bank Statement Balance", f"₱{statement_ending_balance:,.2f}")
+    m3.metric("Less: Outstanding Checks", f"₱{total_outstanding_amt:,.2f}")
+    m4.metric("Adjusted Bank Balance", f"₱{adjusted_bank_balance:,.2f}")
+
+    if abs(out_of_balance_variance) < 0.01:
+        st.success("✅ **Balanced!** Your GL Book Balance perfectly matches the Adjusted Bank Balance.")
+    else:
+        st.warning(f"⚠️ **Out of Balance Discrepancy:** ₱{out_of_balance_variance:,.2f}.")
+
+    # --- 6. COMMIT / CLEAR CHECK ACTION ---
+    if not edited_df.empty and len(cleared_rows) > 0:
+        if st.button(f"💾 Commit & Clear {len(cleared_rows)} Selected Check(s) (Total: ₱{total_cleared_amt:,.2f})", type="primary"):
+            try:
+                for _, row in cleared_rows.iterrows():
+                    v_no = row["Voucher No"]
+                    amt = row["Amount (₱)"]
+                    raw_clearing_date = row["Passbook Clearing Date"]
+
+                    # Format clearing date string
+                    if hasattr(raw_clearing_date, 'strftime'):
+                        cleared_date_str = raw_clearing_date.strftime('%Y-%m-%d')
+                    else:
+                        cleared_date_str = str(raw_clearing_date)
+
+                    # 1. Mark status as 'Cleared' with user's Passbook Clearing Date in floating_checks table
+                    c.execute("""
+                        UPDATE floating_checks 
+                        SET status = 'Cleared', cleared_at = ? 
+                        WHERE id = ?
+                    """, (cleared_date_str, row["ID"]))
+
+                    # 2. GL Posting using the passbook clearing date as the transaction entry_date
+                    c.execute("""
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                        VALUES (?, ?, '20200', 'Checks Payable / PDC Issued', ?, 0.0, ?, ?, '')
+                    """, (cleared_date_str, v_no, amt, f"Passbook Cleared - Chk #{row['Check No']}"))
+
+                    c.execute("""
+                        INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                        VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, '')
+                    """, (cleared_date_str, v_no, selected_acct_code, selected_account_str, amt, f"Passbook Cleared - Chk #{row['Check No']}"))
+
+                conn.commit()
+                st.success(f"🎉 Successfully marked {len(cleared_rows)} check(s) as Cleared! GL posted under selected passbook clearing dates.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error committing bank reconciliation: {e}")
+#============================================================================end of bank reconciliation========================
