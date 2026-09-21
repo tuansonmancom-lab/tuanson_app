@@ -3116,37 +3116,76 @@ elif role == "Accounting":
                     key=f"print_chk_{cv_no}_{idx}"
                 )
 
-                # --- ✏️ EDIT VOUCHER AMOUNT TOOL ---
-                with st.expander(f"⚙️ Options / Adjust Amount for {cv_no}"):
-                    col_e1, col_e2 = st.columns([2, 1])
+                # --- ✏️ FULL INLINE EDIT TOOL (Amount, Check No, Check Date) ---
+                with st.expander(f"⚙️ Options / Edit Details for {cv_no}"):
+                    col_e1, col_e2, col_e3 = st.columns(3)
+                    
                     new_voucher_amt = col_e1.number_input(
-                        "New Total Amount (₱)", 
+                        "Total Amount (₱)", 
                         min_value=0.01, 
                         value=float(total_amt), 
                         step=100.0, 
                         key=f"edit_amt_val_{cv_no}_{idx}"
                     )
                     
-                    if col_e2.button("💾 Save New Amount", key=f"btn_save_amt_{cv_no}_{idx}", type="secondary"):
+                    new_check_no = col_e2.text_input(
+                        "Cheque / Ref Number", 
+                        value=str(c_num or ''), 
+                        key=f"edit_chk_no_{cv_no}_{idx}"
+                    )
+
+                    # Safely parse current check date for date picker default
+                    try:
+                        init_date = pd.to_datetime(c_date).date() if c_date else datetime.now().date()
+                    except Exception:
+                        init_date = datetime.now().date()
+
+                    new_check_date = col_e3.date_input(
+                        "Cheque Date", 
+                        value=init_date, 
+                        key=f"edit_chk_dt_{cv_no}_{idx}"
+                    )
+                    
+                    is_blank_dt = st.checkbox(
+                        "🎟️ Keep Cheque Date Blank (Open Date / Floating)", 
+                        value=(not bool(c_date)), 
+                        key=f"blank_dt_{cv_no}_{idx}"
+                    )
+
+                    if st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{idx}", type="primary"):
                         try:
-                            # 1. Update Journal Entries (Debit and Credit sides)
+                            formatted_chk_date = "" if is_blank_dt else new_check_date.strftime('%Y-%m-%d')
+                            
+                            # 1. Update Journal Entries (Debit and Credit amounts)
                             c.execute("UPDATE journal_entries SET debit = ? WHERE voucher_no = ? AND debit > 0", (new_voucher_amt, cv_no))
                             c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND credit > 0", (new_voucher_amt, cv_no))
                             
-                            # 2. Update Deliveries table if linked to APV
-                            c.execute("UPDATE deliveries SET total_amount = ? WHERE cv_number = ?", (new_voucher_amt, cv_no))
+                            # 2. Update Deliveries table
+                            c.execute("""
+                                UPDATE deliveries 
+                                SET total_amount = ?, cheque_no = ?, cheque_date = ? 
+                                WHERE cv_number = ?
+                            """, (new_voucher_amt, new_check_no.strip(), formatted_chk_date, cv_no))
                             
-                            # 3. Update Requests table if linked to PO
-                            c.execute("UPDATE requests SET amount = ? WHERE cv_number = ?", (new_voucher_amt, cv_no))
+                            # 3. Update Requests table
+                            c.execute("""
+                                UPDATE requests 
+                                SET amount = ?, cheque_no = ?, cheque_date = ? 
+                                WHERE cv_number = ?
+                            """, (new_voucher_amt, new_check_no.strip(), formatted_chk_date, cv_no))
                             
-                            # 4. Update Floating Checks register if applicable
-                            c.execute("UPDATE floating_checks SET amount = ? WHERE voucher_no = ?", (new_voucher_amt, cv_no))
+                            # 4. Update Floating Checks register
+                            c.execute("""
+                                UPDATE floating_checks 
+                                SET amount = ?, check_no = ?, check_date = ? 
+                                WHERE voucher_no = ?
+                            """, (new_voucher_amt, new_check_no.strip(), formatted_chk_date, cv_no))
                             
                             conn.commit()
-                            st.success(f"🎉 Updated {cv_no} total amount to ₱{new_voucher_amt:,.2f} across all GL ledgers and vouchers!")
+                            st.success(f"🎉 Updated {cv_no} details (Amount: ₱{new_voucher_amt:,.2f}, Check No: {new_check_no or 'N/A'}, Date: {formatted_chk_date or 'Blank'}) across all records!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"❌ Error updating amount: {e}")
+                            st.error(f"❌ Error updating voucher details: {e}")
 
                 st.markdown("---")
         #=============================================================
