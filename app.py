@@ -2479,7 +2479,7 @@ elif role == "Accounting":
         "📝 Accounts Payable Voucher (APV)", 
         "💸 Check / Payment Voucher (CV)", 
         "📖 General Ledger Entries",
-        "📈 Financial Statements"
+        "📈 Financial Statements",
         "🏦 Bank Reconciliation"  # <--- NEW TAB 6
     ])
     
@@ -3485,7 +3485,7 @@ elif role == "Accounting":
 
 
         #===================================================================
-        # --- TAB 6: BANK RECONCILIATION ---
+        # --- TAB 5: BANK RECONCILIATION ---
         with tab_br:
             render_bank_reconciliation_tab(conn)
             
