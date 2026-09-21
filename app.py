@@ -7,10 +7,11 @@ from datetime import datetime
 from io import BytesIO
 
 #============================================================================Bank Reconciliation===============================
+import streamlit as st
+import pandas as pd
+from datetime import datetime, date
+
 def render_bank_reconciliation_tab(conn):
-    import streamlit as st
-    import pandas as pd
-    from datetime import date, datetime  # <--- MAKE SURE 'date' IS IMPORTED HERE
     c = conn.cursor()
     st.header("🏦 Bank Reconciliation Statement")
     st.caption("Reconcile General Ledger Cash in Bank balances and record official passbook clearing dates.")
@@ -30,7 +31,7 @@ def render_bank_reconciliation_tab(conn):
     selected_account_str = col_f1.selectbox("Select Bank Account", options=account_options)
     selected_acct_code = selected_account_str.split("]")[0].replace("[", "").strip()
 
-    # Date Period Selection
+    # Date Period Selection with safety for mid-selection inputs
     today = date.today()
     first_day_curr_month = date(today.year, today.month, 1)
     
@@ -40,10 +41,17 @@ def render_bank_reconciliation_tab(conn):
         key="bank_rec_date_range"
     )
 
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        from_date, to_date = date_range
+    if isinstance(date_range, (tuple, list)):
+        if len(date_range) == 2:
+            from_date, to_date = date_range
+        elif len(date_range) == 1:
+            from_date = to_date = date_range[0]
+        else:
+            from_date, to_date = first_day_curr_month, today
     else:
-        from_date, to_date = first_day_curr_month, today
+        from_date = to_date = date_range
+
+    to_date_str = to_date.strftime('%Y-%m-%d') if hasattr(to_date, 'strftime') else str(to_date)
 
     statement_ending_balance = col_f3.number_input(
         "Bank Statement Ending Balance (₱)",
@@ -60,7 +68,7 @@ def render_bank_reconciliation_tab(conn):
         SELECT SUM(debit) - SUM(credit) 
         FROM journal_entries 
         WHERE account_code = ? AND DATE(entry_date) <= ?
-    """, (selected_acct_code, to_date.strftime('%Y-%m-%d'))).fetchone()
+    """, [selected_acct_code, to_date_str]).fetchone()
     
     gl_book_balance = float(gl_balance_row[0]) if gl_balance_row and gl_balance_row[0] else 0.0
 
@@ -69,15 +77,15 @@ def render_bank_reconciliation_tab(conn):
         SELECT id, voucher_no, check_no, check_date, payee, amount, status 
         FROM floating_checks 
         WHERE (status = 'Pending' OR status = 'Un-encashed' OR status IS NULL OR status = '')
-          AND DATE(created_at) <= ?
+          AND (DATE(check_date) <= ? OR check_date IS NULL OR check_date = '')
         ORDER BY check_date ASC
-    """, (to_date.strftime('%Y-%m-%d'),)).fetchall()
+    """, [to_date_str]).fetchall()
 
     df_checks = pd.DataFrame(uncleared_checks, columns=["ID", "Voucher No", "Check No", "Issue Date", "Payee / Supplier", "Amount (₱)", "Status"])
     
     if not df_checks.empty:
         df_checks["Mark Cleared"] = False
-        df_checks["Passbook Clearing Date"] = today  # Default clearing date picker value
+        df_checks["Passbook Clearing Date"] = today
 
     # --- 4. INTERACTIVE RECONCILIATION TABLE ---
     st.subheader("📋 Outstanding / Floating Checks")
@@ -87,7 +95,7 @@ def render_bank_reconciliation_tab(conn):
         edited_df = st.data_editor(
             df_checks,
             column_config={
-                "ID": None,  # Hide database ID
+                "ID": None,
                 "Mark Cleared": st.column_config.CheckboxColumn("Cleared?", default=False),
                 "Passbook Clearing Date": st.column_config.DateColumn(
                     "Passbook Clearing Date",
@@ -142,32 +150,26 @@ def render_bank_reconciliation_tab(conn):
                     amt = row["Amount (₱)"]
                     raw_clearing_date = row["Passbook Clearing Date"]
 
-                    # Format clearing date string
-                    if hasattr(raw_clearing_date, 'strftime'):
-                        cleared_date_str = raw_clearing_date.strftime('%Y-%m-%d')
-                    else:
-                        cleared_date_str = str(raw_clearing_date)
+                    cleared_date_str = raw_clearing_date.strftime('%Y-%m-%d') if hasattr(raw_clearing_date, 'strftime') else str(raw_clearing_date)
 
-                    # 1. Mark status as 'Cleared' with user's Passbook Clearing Date in floating_checks table
                     c.execute("""
                         UPDATE floating_checks 
                         SET status = 'Cleared', cleared_at = ? 
                         WHERE id = ?
-                    """, (cleared_date_str, row["ID"]))
+                    """, [cleared_date_str, row["ID"]])
 
-                    # 2. GL Posting using the passbook clearing date as the transaction entry_date
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, '20200', 'Checks Payable / PDC Issued', ?, 0.0, ?, ?, '')
-                    """, (cleared_date_str, v_no, amt, f"Passbook Cleared - Chk #{row['Check No']}"))
+                    """, [cleared_date_str, v_no, amt, f"Passbook Cleared - Chk #{row['Check No']}"])
 
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, '')
-                    """, (cleared_date_str, v_no, selected_acct_code, selected_account_str, amt, f"Passbook Cleared - Chk #{row['Check No']}"))
+                    """, [cleared_date_str, v_no, selected_acct_code, selected_account_str, amt, f"Passbook Cleared - Chk #{row['Check No']}"])
 
                 conn.commit()
-                st.success(f"🎉 Successfully marked {len(cleared_rows)} check(s) as Cleared! GL posted under selected passbook clearing dates.")
+                st.success(f"🎉 Successfully marked {len(cleared_rows)} check(s) as Cleared!")
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Error committing bank reconciliation: {e}")
