@@ -10,13 +10,20 @@ from io import BytesIO
 # BIR FORM 2307 (JANUARY 2018 ENCS) OFFICIAL TEMPLATE GENERATOR
 # ==============================================================================
 import io
+import pandas as pd
+import streamlit as st
 from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
+
+# ==============================================================================
+# 1. BIR FORM 2307 PDF GENERATOR FUNCTION
+# ==============================================================================
 def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
+    """Generates a fully formatted BIR Form 2307 PDF buffer with text wrapping."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -24,30 +31,86 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         leftMargin=20,
         rightMargin=20,
         topMargin=20,
-        bottomMargin=20
+        bottomMargin=20,
     )
     story = []
     styles = getSampleStyleSheet()
 
     # Paragraph Styles
-    style_hdr = ParagraphStyle('Hdr', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=6.5, leading=7.5, alignment=1)
-    style_cell = ParagraphStyle('Cell', parent=styles['Normal'], fontName='Helvetica', fontSize=7, leading=8.5, alignment=0)
-    style_cell_center = ParagraphStyle('CellC', parent=styles['Normal'], fontName='Helvetica', fontSize=7, leading=8.5, alignment=1)
-    style_cell_right = ParagraphStyle('CellR', parent=styles['Normal'], fontName='Helvetica', fontSize=7, leading=8.5, alignment=2)
-    style_title = ParagraphStyle('Title', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=10, alignment=1)
+    style_hdr = ParagraphStyle(
+        "Hdr",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=6.5,
+        leading=7.5,
+        alignment=1,
+    )
+    style_cell = ParagraphStyle(
+        "Cell",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7,
+        leading=8.5,
+        alignment=0,
+    )
+    style_cell_center = ParagraphStyle(
+        "CellC",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7,
+        leading=8.5,
+        alignment=1,
+    )
+    style_cell_right = ParagraphStyle(
+        "CellR",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7,
+        leading=8.5,
+        alignment=2,
+    )
+    style_title = ParagraphStyle(
+        "Title",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=10,
+        alignment=1,
+    )
 
-    # Safely extract details with fallbacks
-    payee_name = supplier_data.get('payee_name') or supplier_data.get('name') or "N/A"
-    payee_tin = supplier_data.get('payee_tin') or supplier_data.get('tin') or "000-000-000-000"
-    payee_addr = supplier_data.get('payee_address') or supplier_data.get('address') or "N/A"
-    
-    period_from = voucher_data.get('period_from', '')
-    period_to = voucher_data.get('period_to', '')
-    
-    income_type = wht_details.get('income_type', 'PURCHASE OF GOODS')
-    atc_code = wht_details.get('atc', 'WI158')
-    gross_amt = float(wht_details.get('gross', 0.0))
-    tax_amt = float(wht_details.get('tax', 0.0))
+    # Extract details safely with fallbacks
+    payee_name = (
+        supplier_data.get("payee_name") or supplier_data.get("name") or "N/A"
+    )
+    payee_tin = (
+        supplier_data.get("payee_tin")
+        or supplier_data.get("tin")
+        or "000-000-000-000"
+    )
+    payee_addr = (
+        supplier_data.get("payee_address")
+        or supplier_data.get("address")
+        or "N/A"
+    )
+
+    period_from = voucher_data.get("period_from", "")
+    period_to = voucher_data.get("period_to", "")
+
+    income_type = wht_details.get("income_type", "PURCHASE OF GOODS")
+    atc_code = wht_details.get("atc", "WI158")
+    gross_amt = float(wht_details.get("gross", 0.0))
+    tax_amt = float(wht_details.get("tax", 0.0))
+
+    # --- TOP HEADER BLOCK ---
+    header_html = "**Republic of the Philippines**
+    Department of Finance
+
+
+Bureau of Internal Revenue"
+sub_hdr_style = ParagraphStyle(
+"SubHdr", alignment=1, fontSize=7, leading=8.5
+)
+
 
     # --- TOP HEADER ---
     story.append(
@@ -68,63 +131,102 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     )
     
     story.append(Spacer(1, 6))
-    
-    # --- PERIOD TABLE ---
-    period_text = f"**1 For the Period From:** {period_from} **To:** {period_to}"
-    period_table = Table([[Paragraph(period_text, style_cell)]], colWidths=[572])
-    period_table.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F5F5F5')),
-        ('PADDING', (0,0), (-1,-1), 4),
-    ]))
-    story.append(period_table)
-    story.append(Spacer(1, 6))
-    
-    # --- PART I: PAYEE INFO ---
-    payee_data = [
-        [Paragraph("**Part I – Payee Information**", style_cell_center), ""],
-        [Paragraph("**2 TIN:**", style_cell), Paragraph(payee_tin, style_cell)],
-        [Paragraph("**3 Payee's Name:**", style_cell), Paragraph(payee_name, style_cell)],
-        [Paragraph("**4 Registered Address:**", style_cell), Paragraph(payee_addr, style_cell)]
-    ]
-    t_payee = Table(payee_data, colWidths=[130, 442])
-    t_payee.setStyle(TableStyle([
-        ('SPAN', (0,0), (1,0)),
-        ('BACKGROUND', (0,0), (1,0), colors.HexColor('#E0E0E0')),
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('PADDING', (0,0), (-1,-1), 3),
-    ]))
-    story.append(t_payee)
-    story.append(Spacer(1, 6))
-    
-    # --- PART II: PAYOR INFO ---
+    story.append(Paragraph(header_html, sub_hdr_style))
+story.append(
+    Paragraph(
+        "**Certificate of Creditable Tax Withheld at Source (BIR Form No. 2307)**",
+        style_title,
+    )
+)
+story.append(Spacer(1, 6))
+
+# --- PERIOD TABLE ---
+period_text = (
+    f"**1 For the Period From:** {period_from} **To:** {period_to}"
+)
+period_table = Table([[Paragraph(period_text, style_cell)]], colWidths=[572])
+period_table.setStyle(
+    TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F5F5F5")),
+        ("PADDING", (0, 0), (-1, -1), 4),
+    ])
+)
+story.append(period_table)
+story.append(Spacer(1, 6))
+
+# --- PART I: PAYEE INFORMATION ---
+payee_data = [
+    [Paragraph("**Part I – Payee Information**", style_cell_center), ""],
+    [
+        Paragraph("**2 TIN:**", style_cell),
+        Paragraph(payee_tin, style_cell),
+    ],
+    [
+        Paragraph("**3 Payee's Name:**", style_cell),
+        Paragraph(payee_name, style_cell),
+    ],
+    [
+        Paragraph("**4 Registered Address:**", style_cell),
+        Paragraph(payee_addr, style_cell),
+    ],
+]
+t_payee = Table(payee_data, colWidths=[130, 442])
+t_payee.setStyle(
+    TableStyle([
+        ("SPAN", (0, 0), (1, 0)),
+        ("BACKGROUND", (0, 0), (1, 0), colors.HexColor("#E0E0E0")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("PADDING", (0, 0), (-1, -1), 3),
+    ])
+)
+story.append(t_payee)
+story.append(Spacer(1, 6))
+
+    # --- PART II: PAYOR INFORMATION ---
     payor_data = [
         [Paragraph("**Part II – Payor Information**", style_cell_center), ""],
-        [Paragraph("**6 TIN:**", style_cell), Paragraph("908-376-188-000", style_cell)],
-        [Paragraph("**7 Payor's Name:**", style_cell), Paragraph("TUANSON CONSTRUCTION", style_cell)],
-        [Paragraph("**8 Registered Address:**", style_cell), Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu (ZIP: 6045)", style_cell)]
+        [
+            Paragraph("**6 TIN:**", style_cell),
+            Paragraph("908-376-188-000", style_cell),
+        ],
+        [
+            Paragraph("**7 Payor's Name:**", style_cell),
+            Paragraph("TUANSON CONSTRUCTION", style_cell),
+        ],
+        [
+            Paragraph("**8 Registered Address:**", style_cell),
+            Paragraph(
+                "162 P. Labuca St., Cansojong, Talisay City, Cebu (ZIP: 6045)",
+                style_cell,
+            ),
+        ],
     ]
     t_payor = Table(payor_data, colWidths=[130, 442])
-    t_payor.setStyle(TableStyle([
-        ('SPAN', (0,0), (1,0)),
-        ('BACKGROUND', (0,0), (1,0), colors.HexColor('#E0E0E0')),
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('PADDING', (0,0), (-1,-1), 3),
-    ]))
+    t_payor.setStyle(
+        TableStyle([
+            ("SPAN", (0, 0), (1, 0)),
+            ("BACKGROUND", (0, 0), (1, 0), colors.HexColor("#E0E0E0")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("PADDING", (0, 0), (-1, -1), 3),
+        ])
+    )
     story.append(t_payor)
     story.append(Spacer(1, 8))
     
-    # --- PART III: INCOME PAYMENTS TABLE (WRAPPED HEADERS PREVENT OVERLAP) ---
+    # --- PART III: WITHHOLDING TAX BREAKDOWN TABLE ---
     hdr_row = [
-        Paragraph("Income Payments Subject to Expanded Withholding Tax", style_hdr),
+        Paragraph(
+            "Income Payments Subject to Expanded Withholding Tax", style_hdr
+        ),
         Paragraph("ATC", style_hdr),
         Paragraph("1st Month", style_hdr),
         Paragraph("2nd Month", style_hdr),
         Paragraph("3rd Month", style_hdr),
         Paragraph("Total", style_hdr),
-        Paragraph("Tax Withheld", style_hdr)
+        Paragraph("Tax Withheld", style_hdr),
     ]
     
     data_row = [
@@ -134,49 +236,64 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         Paragraph(f"{gross_amt:,.2f}", style_cell_right),
         Paragraph("-", style_cell_center),
         Paragraph(f"{gross_amt:,.2f}", style_cell_right),
-        Paragraph(f"{tax_amt:,.2f}", style_cell_right)
+        Paragraph(f"{tax_amt:,.2f}", style_cell_right),
     ]
     
     total_row = [
         Paragraph("**Total**", style_cell_center),
-        "", "", "", "",
+        "",
+        "",
+        "",
+        "",
         Paragraph(f"**{gross_amt:,.2f}**", style_cell_right),
-        Paragraph(f"**{tax_amt:,.2f}**", style_cell_right)
+        Paragraph(f"**{tax_amt:,.2f}**", style_cell_right),
     ]
     
-    # Explicit column widths total exactly 572 points (Letter width page printable area)
-    wht_table = Table([hdr_row, data_row, total_row], colWidths=[192, 50, 60, 70, 60, 70, 70])
-    wht_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#E0E0E0')),
-        ('BOX', (0,0), (-1,-1), 0.5, colors.black),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('PADDING', (0,0), (-1,-1), 4),
-    ]))
+    wht_table = Table(
+        [hdr_row, data_row, total_row],
+        colWidths=[192, 50, 60, 70, 60, 70, 70],
+    )
+    wht_table.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E0E0E0")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("PADDING", (0, 0), (-1, -1), 4),
+        ])
+    )
     story.append(wht_table)
     story.append(Spacer(1, 15))
     
     # --- SIGNATURE BLOCK ---
-    sig_p1 = Paragraph("**MICHELLE F. BAISAC**
+        sig_p1 = Paragraph(
+            "**MICHELLE F. BAISAC**
+            Accounting Officer / TIN 239-431-789",
+    style_cell_center,
+    )
+    sig_p2 = Paragraph(
+    "Payee's Authorized Representative
     
-    Accounting Officer / TIN 239-431-789", style_cell_center)
-    sig_p2 = Paragraph("Payee's Authorized Representative
     
-    
-    (Signature over Printed Name)", style_cell_center)
-    
+    (Signature over Printed"
+    " Name)",
+    style_cell_center,
+    )
     sig_table = Table([[sig_p1, sig_p2]], colWidths=[286, 286])
-    sig_table.setStyle(TableStyle([
-        ('LINEBELOW', (0,0), (0,0), 0.5, colors.black),
-        ('LINEBELOW', (1,0), (1,0), 0.5, colors.black),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('PADDING', (0,0), (-1,-1), 8),
-    ]))
+    sig_table.setStyle(
+        TableStyle([
+            ("LINEBELOW", (0, 0), (0, 0), 0.5, colors.black),
+            ("LINEBELOW", (1, 0), (1, 0), 0.5, colors.black),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("PADDING", (0, 0), (-1, -1), 8),
+        ])
+    )
     story.append(sig_table)
     
     doc.build(story)
     buffer.seek(0)
     return buffer
+  
     # ==============================================================================
     # END OF - BIR FORM 2307 (JANUARY 2018 ENCS) OFFICIAL TEMPLATE GENERATOR
     # ==============================================================================
