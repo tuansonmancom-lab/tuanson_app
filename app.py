@@ -17,78 +17,51 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     story = []
-    
-    # Simple styling to mimic BIR Form 2307 layout blocks
+   
     styles = getSampleStyleSheet()
     style_center = styles['Normal']
-    style_center.alignment = 1 # Center align for headers
-    
-    # Header Title (Fixed with triple quotes)
-    header_text = """**Republic of the Philippines**
+    style_center.alignment = 1 # Center align
 
-    Department of Finance
-
-
-    Bureau of Internal Revenue
-
-
-
-    BIR Form No. 2307
-
-
+    # Header Title
+    header_text = """<b>Republic of the Philippines</b><br/>
+    Department of Finance<br/>
+    Bureau of Internal Revenue<br/><br/>
+    <b>BIR Form No. 2307</b><br/>
     Certificate of Creditable Tax Withheld at Source"""
-
     story.append(Paragraph(header_text, style_center))
     story.append(Spacer(1, 15))
 
-    Part I & II: Payee & Payor Info Table
+    # Part I & II: Payee & Payor Info Table
     supplier_tin = supplier_data.get('tin', '000-000-000-000')
     supplier_name = supplier_data.get('name', 'N/A')
     supplier_address = supplier_data.get('address', 'N/A')
 
     data_info = [
-    [
-    Paragraph("Part I - Payee Information", styles['Normal']),
-    Paragraph("Part II - Payor Information", styles['Normal'])
-    ],
-    [
-    Paragraph(f"""TIN: {supplier_tin}
-
-
-    PaySlip-Office Assign.pdfe's Name: {supplier_name}
-
-
-    Registered Address: {supplier_address}""", styles['Normal']),
-
-    Paragraph("""TIN: 908-376-188-000
-
-
-    Payor's Name: TUANSON CONSTRUCTION
-
-
-        **Registered Address:** 162 P. Labuca St., Cansojong, Talisay City, Cebu""", styles['Normal'])
-    ]
+        [Paragraph("Part I - Payee Information", styles['Normal']),
+         Paragraph("Part II - Payor Information", styles['Normal'])],
+        [Paragraph(f"TIN: {supplier_tin}<br/>Payee's Name: {supplier_name}<br/>Registered Address: {supplier_address}", styles['Normal']),
+         Paragraph("TIN: 908-376-188-000<br/>Payor's Name: TUANSON CONSTRUCTION<br/>Registered Address: 162 P. Labuca St., Cansojong, Talisay City, Cebu", styles['Normal'])]
     ]
 
     t_info = Table(data_info, colWidths=[270, 270])
     t_info.setStyle(TableStyle([
-    ('BOX', (0,0), (-1,-1), 1, colors.black),
-    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-    ('VALIGN', (0,0), (-1,-1), 'TOP'),
-    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-    ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
     ]))
     story.append(t_info)
     story.append(Spacer(1, 20))
 
-    # Part III: Details of Income Payments and Taxes Withheld
+    # Part III: Income & Tax Details
     gross_amt = wht_details.get('gross', 0.0)
     tax_amt = wht_details.get('tax', 0.0)
 
     data_details = [
-        ["Income Payments Subject to\nExpanded Withholding Tax", "ATC", "Amount of Income\nPayment", "Tax Withheld for\nthe Quarter"],
+        ["Income Payments Subject to Expanded Withholding Tax", "ATC", "Amount of Income Payment", "Tax Withheld for the Quarter"],
         [wht_details.get('income_type', ''), wht_details.get('atc', ''), f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"],
-        ["**Total**", "", f"**{gross_amt:,.2f}**", f"**{tax_amt:,.2f}**"]
+        ["Total", "", f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"]
     ]
 
     t_details = Table(data_details, colWidths=[200, 60, 140, 140])
@@ -98,41 +71,28 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
         ('ALIGN', (1,0), (-1,-1), 'CENTER'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 8),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
     ]))
     story.append(t_details)
     story.append(Spacer(1, 40))
 
-    # Signatories Section
-    signatory_text = """
-    We declare under the penalties of perjury that this certificate has been made in good faith, verified by us, 
-    and to the best of our knowledge and belief, is true and correct, pursuant to the provisions of the National 
-    Internal Revenue Code, as amended, and the regulations issued under authority thereof.
-    """
+    # Signatories
+    signatory_text = """We declare under the penalties of perjury that this certificate has been made in good faith..."""
     story.append(Paragraph(signatory_text, styles['Normal']))
     story.append(Spacer(1, 40))
 
-    # Signature Lines
     sig_data = [
-        ["___________________________________________________", "___________________________________________________"],
-        ["**MICHELLE F. BAISAC**", "**Payee's Authorized Representative**"],
+        ["__________________________", "__________________________"],
+        ["MICHELLE F. BAISAC", "Payee's Authorized Representative"],
         ["Accounting Officer / TIN 239-431-789", "(Signature over Printed Name)"]
     ]
-
     t_sig = Table(sig_data, colWidths=[270, 270])
-    t_sig.setStyle(TableStyle([
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-    ]))
+    t_sig.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')]))
     story.append(t_sig)
 
-    # Build the PDF
+    # Build PDF
     doc.build(story)
-
-    # Reset buffer cursor to the beginning
     buffer.seek(0)
-    return
+    return buffer.getvalue()
 #=========================end of 2307 pdf generator
 #============================================================================Bank Reconciliation===============================
 import streamlit as st
