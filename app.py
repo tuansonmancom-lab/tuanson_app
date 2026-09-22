@@ -7,7 +7,7 @@ from datetime import datetime
 from io import BytesIO
 
 # ==============================================
-# BIR 2307 PDF Generator
+# BIR 2307 PDF Generator (Clean Template)
 # ==============================================
 import io
 from reportlab.lib.pagesizes import letter
@@ -57,7 +57,7 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         [Paragraph(f"TIN: {supplier_tin}<br/>Name: {supplier_name}<br/>Address: {supplier_address}<br/>ZIP: {supplier_zip}", styles['Normal']),
          Paragraph("TIN: 908-376-188-000<br/>Name: TUANSON CONSTRUCTION<br/>Address: 162 P. Labuca St., Cansojong, Talisay City<br/>ZIP: 6045", styles['Normal'])]
     ]
-    t_info = Table(data_info, colWidths=[200,60,80,80,80,100,100])
+    t_info = Table(data_info, colWidths=[270,270])
     t_info.setStyle(TableStyle([
         ('BOX',(0,0),(-1,-1),1,colors.black),
         ('GRID',(0,0),(-1,-1),0.5,colors.black),
@@ -75,9 +75,9 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     data_details = [
         ["Income Payments Subject to Expanded Withholding Tax","ATC","1st Month","2nd Month","3rd Month","Total","Tax Withheld"],
         [wht_details.get('income_type',''), wht_details.get('atc',''), "-", f"{gross_amt:,.2f}", "-", f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"],
-        ["Total","","","","",f"{gross_amt:,.2f}",f"{tax_amt:,.2f}"]
+        ["<b>Total</b>","","","","",f"<b>{gross_amt:,.2f}</b>",f"<b>{tax_amt:,.2f}</b>"]
     ]
-    t_details = Table(data_details, colWidths=[270,270])
+    t_details = Table(data_details, colWidths=[200,60,80,80,80,100,100])
     t_details.setStyle(TableStyle([
         ('BOX',(0,0),(-1,-1),1,colors.black),
         ('GRID',(0,0),(-1,-1),0.5,colors.black),
@@ -88,14 +88,15 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         ('BOTTOMPADDING',(0,0),(-1,-1),8),
     ]))
     story.append(t_details)
-    story.append(Spacer(1, 20))
+    story.append(Spacer(1, 40))
 
     # Declaration
     signatory_text = """We declare under the penalties of perjury that this certificate has been made in good faith,
     verified by us, and to the best of our knowledge and belief, is true and correct, pursuant to the provisions of the
-    National Internal Revenue Code, as amended, and the regulations issued under authority thereof."""
+    National Internal Revenue Code, as amended, and the regulations issued under authority thereof. Further, we give
+    our consent to the processing of our information as contemplated under the Data Privacy Act of 2012 (R.A. No. 10173)."""
     story.append(Paragraph(signatory_text, styles['Normal']))
-    story.append(Spacer(1, 20))
+    story.append(Spacer(1, 40))
 
     # Signatures
     sig_data = [
@@ -106,12 +107,25 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     t_sig = Table(sig_data, colWidths=[270,270])
     t_sig.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER')]))
     story.append(t_sig)
+    story.append(Spacer(1, 30))
+
+    # Conforme Section
+    conforme_data = [
+        ["__________________________", "__________________________"],
+        ["Conforme", "Payee/Payor’s Authorized Representative/Tax Agent"],
+        ["(Signature over Printed Name)", "(Indicate Title/Designation and TIN)"]
+    ]
+    t_conforme = Table(conforme_data, colWidths=[270,270])
+    t_conforme.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER')]))
+    story.append(t_conforme)
 
     # Build PDF
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue() 
-    #================================end of 2307 generator=============
+    # ==============================================
+    # END CODE - BIR 2307 PDF Generator (Clean Template)
+    # ==============================================
 #============================================================================Bank Reconciliation===============================
 import streamlit as st
 import pandas as pd
