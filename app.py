@@ -4424,5 +4424,211 @@ elif role == "Admin View All":
                 except Exception as e:
                     st.error(f"❌ Error during database reset: {e}")
     #================================================================
+#=================================================================================
+### --- ROLE: ENGINEERING (Subcontractor Progress Billings & Rental Licenses) ---
+#=================================================================================
+elif role == "Engineering":
+    st.subheader("👷 Engineering Dashboard - Project Progress Billings")
+    st.caption("Verify site accomplishment and generate subcontractor / rental progress billings directly for Accounting.")
 
+    if st.button("🔄 Refresh Engineering Data", key="btn_refresh_engineering"):
+        st.rerun()
+
+    tab_eng_billing, tab_eng_history = st.tabs([
+        "📝 Subcontractor & Rental Progress Billing", 
+        "📜 Billing History & APV Status"
+    ])
+
+    # -------------------------------------------------------------------------
+    # MODULE 1: PROGRESS BILLING ENTRY
+    # -------------------------------------------------------------------------
+    with tab_eng_billing:
+        st.write("### 📐 Create Progress Billing / APV Requisition")
+        st.info("Submit verified physical accomplishment billings for Labor-Only subcontractors or Rental/License agreements.")
+
+        # 1. Project & Activity Selection
+        col_proj, col_act = st.columns(2)
+        
+        # Extract plain string names from database tuples
+        projects = [r[0] for r in c.execute("SELECT project_name FROM projects").fetchall()]
+        if not projects:
+            projects = ["No projects available"]
+        selected_project = col_proj.selectbox("Select Project Site", projects, key="eng_proj_select")
+
+        act_query = """
+            SELECT a.activity_name 
+            FROM activities a 
+            JOIN projects p ON a.project_id = p.id 
+            WHERE p.project_name = ?
+        """
+        activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
+        if not activities:
+            activities = ["General Project Works"]
+        selected_activity = col_act.selectbox("Project Activity / Scope", activities, key="eng_act_select")
+
+        st.markdown("---")
+        st.write("#### 📋 2. Billing & Contractor Details")
+
+        col_b1, col_b2 = st.columns(2)
+
+        # Billing Type Selection
+        billing_type = col_b1.selectbox(
+            "Billing Type",
+            [
+                "Subcontractor (Labor Only)", 
+                "Project Rental / License (Labor + Materials)"
+            ],
+            key="eng_billing_type"
+        )
+
+        # Contractor / Subcontractor Name Selection
+        suppliers = [r[0] for r in c.execute("SELECT supplier_name FROM suppliers").fetchall()]
+        if not suppliers:
+            suppliers = ["No Contractors Registered"]
+        selected_contractor = col_b2.selectbox("Subcontractor / Rental Owner", suppliers, key="eng_contractor_select")
+
+        col_b3, col_b4 = st.columns([1, 2])
+        billing_ref_no = col_b3.text_input("Billing / Invoice / Statement No.", placeholder="e.g. PB-001 or INV-2026-05", key="eng_bill_ref")
+        billing_date = col_b4.date_input("Billing Date", value=datetime.now().date(), key="eng_bill_date")
+
+        particulars = st.text_area(
+            "Accomplishment Particulars / Scope Covered", 
+            placeholder="e.g. 1st Progress Billing for CHB Laying & Plastering (50% accomplishment verified on-site)",
+            key="eng_particulars"
+        )
+
+        st.markdown("---")
+        st.write("#### 💵 3. Financial Computations & Withholding Deductions")
+
+        col_c1, col_c2, col_c3 = st.columns(3)
+
+        gross_amount = col_c1.number_input("Gross Accomplishment / Billing Amount (₱)", min_value=0.0, step=1000.0, value=0.0, key="eng_gross_amt")
+
+        # Deductions: Retainage (10%) & EWT (2%)
+        apply_retainage = col_c2.checkbox("Apply 10% Contract Retention Withholding", value=(billing_type == "Subcontractor (Labor Only)"), key="eng_apply_ret")
+        apply_ewt = col_c3.checkbox("Apply 2% BIR Form 2307 Withholding Tax (WI160)", value=True, key="eng_apply_ewt")
+
+        retainage_amount = round(gross_amount * 0.10, 2) if apply_retainage else 0.0
+        ewt_amount = round(gross_amount * 0.02, 2) if apply_ewt else 0.0
+        net_payable = max(0.0, round(gross_amount - retainage_amount - ewt_amount, 2))
+
+        # Financial Summary Display Box
+        st.info(f"""
+        📊 **Billing Summary:**
+        * **Gross Accomplishment:** ₱{gross_amount:,.2f}
+        * **Less 10% Retention:** -₱{retainage_amount:,.2f}
+        * **Less 2% BIR 2307 EWT:** -₱{ewt_amount:,.2f}
+        * **NET PAYABLE TO CONTRACTOR:** **₱{net_payable:,.2f}**
+        """)
+
+        # Determine Accounting Category & Debit GL Account Code
+        if billing_type == "Subcontractor (Labor Only)":
+            accounting_category = "Subcontract & Services"
+            debit_account_code = "60200" # Direct Subcontract / Labor Expense code
+            debit_account_name = "Subcontract & Labor Expense"
+        else:
+            accounting_category = "Equipment & Rental"
+            debit_account_code = "60200" # Equipment Rental Expense code
+            debit_account_name = "Equipment & Rental Expense"
+
+        if st.button("🚀 Submit Progress Billing to Accounting", type="primary", key="btn_submit_eng_billing"):
+            if gross_amount <= 0:
+                st.error("⚠️ Please enter a valid gross billing amount greater than ₱0.00.")
+            elif not billing_ref_no.strip():
+                st.error("⚠️ Please enter a Billing / Invoice reference number.")
+            elif selected_contractor == "No Contractors Registered":
+                st.error("⚠️ Please register a contractor in the Suppliers Master list first.")
+            else:
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                doc_ref = f"{'PB' if billing_type == 'Subcontractor (Labor Only)' else 'RNT'}#{billing_ref_no.strip()}"
+                suggested_apv = generate_voucher_number(c, "apv_number", "APV")
+
+                # 1. Record Header Entry in Deliveries Table for Accounting APV Queue
+                c.execute("""
+                    INSERT INTO deliveries 
+                    (pono, supplier, project_name, dr_number, total_amount, received_date, payment_status, apv_number, apv_date) 
+                    VALUES (?, ?, ?, ?, ?, ?, 'Unpaid', ?, ?)
+                """, (
+                    f"ENG-{selected_activity[:10]}", 
+                    selected_contractor, 
+                    selected_project, 
+                    doc_ref, 
+                    gross_amount, 
+                    current_time, 
+                    suggested_apv, 
+                    current_time
+                ))
+
+                # 2. Record Double-Entry General Ledger Postings
+                # Debit: Expense (Gross Amount)
+                c.execute("""
+                    INSERT INTO journal_entries 
+                    (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name, supplier)
+                    VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?)
+                """, (current_time, suggested_apv, debit_account_code, debit_account_name, gross_amount, doc_ref, f"{billing_type}: {particulars}", selected_project, selected_contractor))
+
+                # Credit: Accounts Payable-Trade (Net Payable Amount)
+                c.execute("""
+                    INSERT INTO journal_entries 
+                    (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name, supplier)
+                    VALUES (?, ?, '20100', 'Accounts Payable-Trade', 0.0, ?, ?, ?, ?, ?)
+                """, (current_time, suggested_apv, net_payable, doc_ref, f"Payable accrued for {doc_ref}", selected_project, selected_contractor))
+
+                # Credit: Withholding Tax Payable (2% EWT) if applicable
+                if ewt_amount > 0:
+                    c.execute("""
+                        INSERT INTO journal_entries 
+                        (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name, supplier)
+                        VALUES (?, ?, '20400', 'Withholding Tax Payable - Expanded', 0.0, ?, ?, ?, ?, ?)
+                    """, (current_time, suggested_apv, ewt_amount, doc_ref, f"2% EWT (WI160) withheld for {selected_contractor}", selected_project, selected_contractor))
+
+                # Credit: Contract Retention Payable (10% Retention) if applicable
+                if retainage_amount > 0:
+                    c.execute("""
+                        INSERT INTO journal_entries 
+                        (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name, supplier)
+                        VALUES (?, ?, '20500', 'Contract Retention Payable', 0.0, ?, ?, ?, ?, ?)
+                    """, (current_time, suggested_apv, retainage_amount, doc_ref, f"10% Retainage withheld for {selected_contractor}", selected_project, selected_contractor))
+
+                conn.commit()
+                st.success(f"✅ Progress Billing ({doc_ref}) successfully recorded! Assigned APV #{suggested_apv}. Forwarded to Accounting.")
+                st.rerun()
+
+    # -------------------------------------------------------------------------
+    # MODULE 2: BILLING HISTORY & APV TRACKING
+    # -------------------------------------------------------------------------
+    with tab_eng_history:
+        st.write("### 📜 Progress Billing History & APV Status")
+
+        history_df = pd.read_sql_query("""
+            SELECT 
+                d.apv_number AS 'APV No.',
+                d.received_date AS 'Date Submitted',
+                d.dr_number AS 'Billing Ref',
+                d.supplier AS 'Contractor',
+                d.project_name AS 'Project',
+                d.total_amount AS 'Gross Amount',
+                d.payment_status AS 'Payment Status',
+                d.cv_number AS 'Payment Voucher No.'
+            FROM deliveries d
+            WHERE d.dr_number LIKE 'PB#%' OR d.dr_number LIKE 'RNT#%'
+            ORDER BY d.id DESC
+        """, conn)
+
+        if not history_df.empty:
+            st.dataframe(
+                history_df.style.format({"Gross Amount": "₱{:,.2f}"}),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            csv_eng = history_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Engineering Billing History (CSV)",
+                data=csv_eng,
+                file_name=f"engineering_progress_billings_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("No subcontractor or rental progress billings recorded yet.")
 
