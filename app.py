@@ -25,27 +25,27 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     
     # Header Title (Fixed multiline string with 
 
-tags)
-header_text = (
-"Republic of the Philippines
-
-
-"
-"Department of Finance
-
-
-"
-"Bureau of Internal Revenue
-
-
-
-"
-"BIR Form No. 2307
-
-
-"
-"Certificate of Creditable Tax Withheld at Source"
-)
+    tags)
+    header_text = (
+    "Republic of the Philippines
+    
+    
+    "
+    "Department of Finance
+    
+    
+    "
+    "Bureau of Internal Revenue
+    
+    
+    
+    "
+    "BIR Form No. 2307
+    
+    
+    "
+    "Certificate of Creditable Tax Withheld at Source"
+    )
 story.append(Paragraph(header_text, style_center))
 story.append(Spacer(1, 15))
 
@@ -63,23 +63,23 @@ data_info = [
     [
         Paragraph(f"**TIN:** {supplier_tin}
 
-"
-f"Payee's Name: {supplier_name}
-
-
-"
-f"Registered Address: {supplier_address}", styles['Normal']),
-Paragraph(f"TIN: 908-376-188-000
-
-
-"
-f"Payor's Name: TUANSON CONSTRUCTION
-
-
-"
-f"Registered Address: 162 P. Labuca St., Cansojong, Talisay City, Cebu", styles['Normal'])
-]
-]
+    "
+    f"Payee's Name: {supplier_name}
+    
+    
+    "
+    f"Registered Address: {supplier_address}", styles['Normal']),
+    Paragraph(f"TIN: 908-376-188-000
+    
+    
+    "
+    f"Payor's Name: TUANSON CONSTRUCTION
+    
+    
+    "
+    f"Registered Address: 162 P. Labuca St., Cansojong, Talisay City, Cebu", styles['Normal'])
+    ]
+    ]
 
 # Indentation corrected from here downwards
 t_info = Table(data_info, colWidths=[270, 270])
