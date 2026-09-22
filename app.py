@@ -50,11 +50,7 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     tax_amt = float(wht_details.get('tax', 0.0))
 
     # --- TOP HEADER ---
-    story.append(Paragraph("**Republic of the Philippines**
-
-    Department of Finance
-
-
+    story.append(Paragraph("**Republic of the Philippines**  Department of Finance
     Bureau of Internal Revenue", ParagraphStyle('SubHdr', alignment=1, fontSize=7, leading=8.5)))
     story.append(Paragraph("Certificate of Creditable Tax Withheld at Source (BIR Form No. 2307)", style_title))
     story.append(Spacer(1, 6))
