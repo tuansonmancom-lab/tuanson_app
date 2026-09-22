@@ -6,7 +6,9 @@ import os
 from datetime import datetime
 from io import BytesIO
 
-#=============================================2307 pdf generator===========================
+# ==============================================
+# BIR 2307 PDF Generator
+# ==============================================
 import io
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -15,14 +17,21 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36
+    )
     story = []
-   
+
     styles = getSampleStyleSheet()
     style_center = styles['Normal']
-    style_center.alignment = 1 # Center align
+    style_center.alignment = 1  # Center align
 
-    # Header Title
+    # Header
     header_text = """<b>Republic of the Philippines</b><br/>
     Department of Finance<br/>
     Bureau of Internal Revenue<br/><br/>
@@ -31,69 +40,78 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     story.append(Paragraph(header_text, style_center))
     story.append(Spacer(1, 15))
 
-    # Part I & II: Payee & Payor Info Table
+    # Period
+    period_text = f"For the period:<br/>From {voucher_data.get('period_from','')} To {voucher_data.get('period_to','')}"
+    story.append(Paragraph(period_text, styles['Normal']))
+    story.append(Spacer(1, 15))
+
+    # Payee & Payor Info
     supplier_tin = supplier_data.get('tin', '000-000-000-000')
     supplier_name = supplier_data.get('name', 'N/A')
     supplier_address = supplier_data.get('address', 'N/A')
+    supplier_zip = supplier_data.get('zip', '')
 
     data_info = [
-        [Paragraph("Part I - Payee Information", styles['Normal']),
-         Paragraph("Part II - Payor Information", styles['Normal'])],
-        [Paragraph(f"TIN: {supplier_tin}<br/>Payee's Name: {supplier_name}<br/>Registered Address: {supplier_address}", styles['Normal']),
-         Paragraph("TIN: 908-376-188-000<br/>Payor's Name: TUANSON CONSTRUCTION<br/>Registered Address: 162 P. Labuca St., Cansojong, Talisay City, Cebu", styles['Normal'])]
+        [Paragraph("<b>Part I – Payee Information</b>", styles['Normal']),
+         Paragraph("<b>Part II – Payor Information</b>", styles['Normal'])],
+        [Paragraph(f"TIN: {supplier_tin}<br/>Name: {supplier_name}<br/>Address: {supplier_address}<br/>ZIP: {supplier_zip}", styles['Normal']),
+         Paragraph("TIN: 908-376-188-000<br/>Name: TUANSON CONSTRUCTION<br/>Address: 162 P. Labuca St., Cansojong, Talisay City<br/>ZIP: 6045", styles['Normal'])]
     ]
-
-    t_info = Table(data_info, colWidths=[270, 270])
+    t_info = Table(data_info, colWidths=[270,270])
     t_info.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ('BOX',(0,0),(-1,-1),1,colors.black),
+        ('GRID',(0,0),(-1,-1),0.5,colors.black),
+        ('BACKGROUND',(0,0),(-1,0),colors.lightgrey),
+        ('VALIGN',(0,0),(-1,-1),'TOP'),
+        ('BOTTOMPADDING',(0,0),(-1,-1),10),
     ]))
     story.append(t_info)
     story.append(Spacer(1, 20))
 
-    # Part III: Income & Tax Details
+    # Income Payments Table
     gross_amt = wht_details.get('gross', 0.0)
     tax_amt = wht_details.get('tax', 0.0)
 
     data_details = [
-        ["Income Payments Subject to Expanded Withholding Tax", "ATC", "Amount of Income Payment", "Tax Withheld for the Quarter"],
-        [wht_details.get('income_type', ''), wht_details.get('atc', ''), f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"],
-        ["Total", "", f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"]
+        ["Income Payments Subject to Expanded Withholding Tax","ATC","1st Month","2nd Month","3rd Month","Total","Tax Withheld"],
+        [wht_details.get('income_type',''), wht_details.get('atc',''), "-", f"{gross_amt:,.2f}", "-", f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"],
+        ["Total","","","","",f"{gross_amt:,.2f}",f"{tax_amt:,.2f}"]
     ]
-
-    t_details = Table(data_details, colWidths=[200, 60, 140, 140])
+    t_details = Table(data_details, colWidths=[200,60,80,80,80,100,100])
     t_details.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-        ('ALIGN', (1,0), (-1,-1), 'CENTER'),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOX',(0,0),(-1,-1),1,colors.black),
+        ('GRID',(0,0),(-1,-1),0.5,colors.black),
+        ('BACKGROUND',(0,0),(-1,0),colors.lightgrey),
+        ('ALIGN',(1,0),(-1,-1),'CENTER'),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('TOPPADDING',(0,0),(-1,-1),8),
+        ('BOTTOMPADDING',(0,0),(-1,-1),8),
     ]))
     story.append(t_details)
     story.append(Spacer(1, 40))
 
-    # Signatories
-    signatory_text = """We declare under the penalties of perjury that this certificate has been made in good faith..."""
+    # Declaration
+    signatory_text = """We declare under the penalties of perjury that this certificate has been made in good faith,
+    verified by us, and to the best of our knowledge and belief, is true and correct, pursuant to the provisions of the
+    National Internal Revenue Code, as amended, and the regulations issued under authority thereof."""
     story.append(Paragraph(signatory_text, styles['Normal']))
     story.append(Spacer(1, 40))
 
+    # Signatures
     sig_data = [
         ["__________________________", "__________________________"],
         ["MICHELLE F. BAISAC", "Payee's Authorized Representative"],
         ["Accounting Officer / TIN 239-431-789", "(Signature over Printed Name)"]
     ]
-    t_sig = Table(sig_data, colWidths=[270, 270])
-    t_sig.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')]))
+    t_sig = Table(sig_data, colWidths=[270,270])
+    t_sig.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER')]))
     story.append(t_sig)
 
     # Build PDF
     doc.build(story)
     buffer.seek(0)
-    return buffer.getvalue()
-#=========================end of 2307 pdf generator
+    return buffer.getvalue() 
+    #================================end of 2307 generator=============
 #============================================================================Bank Reconciliation===============================
 import streamlit as st
 import pandas as pd
