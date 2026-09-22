@@ -24,22 +24,20 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     style_center.alignment = 1 # Center align for headers
     
     # Header Title (Fixed multiline string with tags)
-    header_text = (
-    "Republic of the Philippines 
+    # Header Title (Fixed with triple quotes)
+    header_text = """**Republic of the Philippines**
+    Department of Finance
+
+
+    Bureau of Internal Revenue
+
+
+
+    BIR Form No. 2307
+
+
+    Certificate of Creditable Tax Withheld at Source"""
     
-    "
-    "Department of Finance 
-    
-    "
-    "Bureau of Internal Revenue 
-    
-    
-    "
-    "BIR Form No. 2307 
-    
-    "
-    "Certificate of Creditable Tax Withheld at Source"
-    )
 story.append(Paragraph(header_text, style_center))
 story.append(Spacer(1, 15))
 
