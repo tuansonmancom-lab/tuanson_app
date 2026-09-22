@@ -26,7 +26,42 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         bottomMargin=18
     )
     story = []
+    
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import Paragraph
+    
     styles = getSampleStyleSheet()
+    hdr_style = ParagraphStyle(
+        'HdrStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=7,
+        leading=8,
+        alignment=1 # Center aligned
+    )
+    
+    # Build table header cells using Paragraphs
+    table_data = [
+        [
+            Paragraph("Income Payments Subject to Expanded Withholding Tax", hdr_style),
+            Paragraph("ATC", hdr_style),
+            Paragraph("1st Month", hdr_style),
+            Paragraph("2nd Month", hdr_style),
+            Paragraph("3rd Month", hdr_style),
+            Paragraph("Total", hdr_style),
+            Paragraph("Tax Withheld", hdr_style)
+        ],
+        # Row Data
+        [
+            income_type,
+            atc_code,
+            "-",
+            f"{new_voucher_amt:,.2f}",
+            "-",
+            f"{new_voucher_amt:,.2f}",
+            f"{computed_tax_withheld:,.2f}"
+        ]
+    ]
 
     # --- Typography Styles ---
     s_lbl = ParagraphStyle('FormLbl', parent=styles['Normal'], fontSize=6, leading=7, fontName='Helvetica-Bold')
@@ -54,6 +89,7 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
             Paragraph("||||||||||||||||||||||||||<br/>2307 01/18ENCS", s_center)
         ]
     ]
+    
     t_hdr = Table(hdr_data, colWidths=[55, 55, 336, 130])
     t_hdr.setStyle(TableStyle([
         ('SPAN', (2,0), (3,0)),
