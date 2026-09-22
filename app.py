@@ -7,7 +7,7 @@ from datetime import datetime
 from io import BytesIO
 
 # ==============================================================================
-# BIR FORM 2307 (JANUARY 2018 ENCS) CLEAN TEMPLATE GENERATOR - FIXED OVERLAP
+# BIR FORM 2307 (JANUARY 2018 ENCS) OFFICIAL TEMPLATE GENERATOR
 # ==============================================================================
 import io
 from reportlab.lib.pagesizes import letter
@@ -33,7 +33,7 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     s_val = ParagraphStyle('FormVal', parent=styles['Normal'], fontSize=7.5, leading=9, fontName='Helvetica')
     s_val_right = ParagraphStyle('FormValR', parent=styles['Normal'], alignment=2, fontSize=7.5, leading=9, fontName='Helvetica')
     s_center = ParagraphStyle('CenterTxt', parent=styles['Normal'], alignment=1, fontSize=7, leading=8.5)
-    s_th = ParagraphStyle('TH', parent=styles['Normal'], alignment=1, fontSize=6, leading=7.5, fontName='Helvetica-Bold')
+    s_th = ParagraphStyle('TH', parent=styles['Normal'], alignment=1, fontSize=6, leading=7, fontName='Helvetica-Bold')
 
     BG_GREY = colors.HexColor('#E5E5E5')
 
@@ -42,16 +42,16 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     # ==========================================================================
     hdr_data = [
         [
-            Paragraph("For BIRUse Only", s_lbl),
+            Paragraph("For BIR<br/>Use Only", s_lbl),
             Paragraph("BCS/<br/>Item:", s_lbl),
-            Paragraph("Republic of the Philippines</b><br/>Department of Finance<br/>Bureau of Internal Revenue", s_center),
+            Paragraph("<b>Republic of the Philippines</b><br/>Department of Finance<br/>Bureau of Internal Revenue", s_center),
             ""
         ],
         [
-            Paragraph("BIR Form No. 2307</b><br/>January 2018 (ENCS)", s_center),
+            Paragraph("<b>BIR Form No. 2307</b><br/>January 2018 (ENCS)", s_center),
             "",
-            Paragraph("Certificate of Creditable Tax Withheld at Source", s_center),
-            Paragraph("||||||||||||||||||||||||||2307 01/18ENCS", s_center)
+            Paragraph("<b>Certificate of Creditable Tax Withheld at Source</b>", s_center),
+            Paragraph("||||||||||||||||||||||||||<br/>2307 01/18ENCS", s_center)
         ]
     ]
     t_hdr = Table(hdr_data, colWidths=[55, 55, 336, 130])
@@ -61,11 +61,9 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         ('BOX', (0,0), (-1,-1), 1, colors.black),
         ('GRID', (0,0), (-1,-1), 0.5, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 2),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
     story.append(t_hdr)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 10))
 
     # ==========================================================================
     # 2. PERIOD COVERED
@@ -76,7 +74,7 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     instr_data = [
         [
             Paragraph("Fill in all applicable spaces. Mark all appropriate boxes with an 'X'.", s_lbl),
-            Paragraph(f"**1** For the Period From: **{p_from}** To: **{p_to}**", s_lbl)
+            Paragraph(f"<b>1</b> For the Period From: <b>{p_from}</b> To: <b>{p_to}</b>", s_lbl)
         ]
     ]
     t_instr = Table(instr_data, colWidths=[240, 336])
@@ -84,12 +82,9 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         ('BOX', (0,0), (-1,-1), 1, colors.black),
         ('GRID', (0,0), (-1,-1), 0.5, colors.black),
         ('BACKGROUND', (0,0), (0,0), BG_GREY),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 2),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
     story.append(t_instr)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 10))
 
     # ==========================================================================
     # 3. PART I - PAYEE INFORMATION
@@ -100,11 +95,11 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     s_zip = supplier_data.get('zip') or ''
 
     payee_data = [
-        [Paragraph("**Part I – Payee Information**", s_lbl), ""],
-        [Paragraph(f"**2** TIN: {s_tin}", s_val), ""],
-        [Paragraph(f"**3** Payee's Name: {s_name}", s_val), ""],
-        [Paragraph(f"**4** Registered Address<br/>{s_addr}", s_val),
-        Paragraph(f"4A ZIP Code<br/>{s_zip}", s_val)],
+        [Paragraph("<b>Part I – Payee Information</b>", s_lbl), ""],
+        [Paragraph(f"<b>2</b> TIN: {s_tin}", s_val), ""],
+        [Paragraph(f"<b>3</b> Payee's Name: {s_name}", s_val), ""],
+        [Paragraph(f"4 Registered Address<br/>{s_addr}", s_val),
+         Paragraph(f"4A ZIP Code<br/>{s_zip}", s_val)],
         [Paragraph("5 Foreign Address, if applicable", s_val), ""]
     ]
     t_payee = Table(payee_data, colWidths=[460, 116])
@@ -116,22 +111,19 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         ('BOX', (0,0), (-1,-1), 1, colors.black),
         ('GRID', (0,0), (-1,-1), 0.5, colors.black),
         ('BACKGROUND', (0,0), (-1,0), BG_GREY),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 2),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
     story.append(t_payee)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 10))
 
     # ==========================================================================
     # 4. PART II - PAYOR INFORMATION
     # ==========================================================================
     payor_data = [
-        [Paragraph("**Part II – Payor Information**", s_lbl), ""],
-        [Paragraph("**6** TIN: 908-376-188-000", s_val), ""],
-        [Paragraph("**7** Payor's Name: TUANSON CONSTRUCTION", s_val), ""],
-        [Paragraph("**8** Registered Address<br/>162 P. Labuca St., Cansojong, Talisay City, Cebu", s_val),
-        Paragraph("8A ZIP Code<br/>6045", s_val)]
+        [Paragraph("<b>Part II – Payor Information</b>", s_lbl), ""],
+        [Paragraph("6 TIN: 908-376-188-000", s_val), ""],
+        [Paragraph("7 Payor's Name: TUANSON CONSTRUCTION", s_val), ""],
+        [Paragraph("8 Registered Address<br/>162 P. Labuca St., Cansojong, Talisay City, Cebu", s_val),
+         Paragraph("8A ZIP Code<br/>6045", s_val)]
     ]
     t_payor = Table(payor_data, colWidths=[460, 116])
     t_payor.setStyle(TableStyle([
@@ -141,14 +133,11 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         ('BOX', (0,0), (-1,-1), 1, colors.black),
         ('GRID', (0,0), (-1,-1), 0.5, colors.black),
         ('BACKGROUND', (0,0), (-1,0), BG_GREY),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 2),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
     story.append(t_payor)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 10))
 
-    # ==========================================================================
+     # ==========================================================================
     # 5. PART III - DETAILS OF INCOME PAYMENTS & TAXES WITHHELD
     # ==========================================================================
     gross_amt = wht_details.get('gross', 0.0)
@@ -157,44 +146,23 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     m2 = wht_details.get('m2', gross_amt)
     m3 = wht_details.get('m3', 0.0)
 
-    # Wrapped every single cell inside Paragraph() so text auto-wraps cleanly
     details_data = [
-        [
-            Paragraph("Income Payments Subject to Expanded Withholding Tax", s_th),
-            Paragraph("ATC", s_th),
-            Paragraph("1st Month", s_th),
-            Paragraph("2nd Month", s_th),
-            Paragraph("3rd Month", s_th),
-            Paragraph("Total", s_th),
-            Paragraph("Tax Withheld", s_th)
-        ],
-        [
-            Paragraph(str(wht_details.get('income_type', '')), s_val),
-            Paragraph(str(wht_details.get('atc', '')), s_center),
-            Paragraph(f"{m1:,.2f}" if m1 else "-", s_val_right),
-            Paragraph(f"{m2:,.2f}" if m2 else "-", s_val_right),
-            Paragraph(f"{m3:,.2f}" if m3 else "-", s_val_right),
-            Paragraph(f"{gross_amt:,.2f}", s_val_right),
-            Paragraph(f"{tax_amt:,.2f}", s_val_right)
-        ],
-        [
-            Paragraph("**Total**", s_val),
-            "", "", "", "",
-            Paragraph(f"**{gross_amt:,.2f}**", s_val_right),
-            Paragraph(f"**{tax_amt:,.2f}**", s_val_right)
-        ]
+        ["Income Payments Subject to Expanded Withholding Tax","ATC","1st Month","2nd Month","3rd Month","Total","Tax Withheld"],
+        [wht_details.get('income_type',''), wht_details.get('atc',''),
+         f"{m1:,.2f}" if m1 else "-", f"{m2:,.2f}" if m2 else "-", f"{m3:,.2f}" if m3 else "-",
+         f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"],
+        ["Total","","","","",f"{gross_amt:,.2f}",f"{tax_amt:,.2f}"]
     ]
-    t_details = Table(details_data, colWidths=[170, 36, 65, 65, 65, 75, 100])
+    t_details = Table(details_data, colWidths=[170,36,65,65,65,75,100])
     t_details.setStyle(TableStyle([
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('BACKGROUND', (0,0), (-1,0), BG_GREY),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ('BOX',(0,0),(-1,-1),1,colors.black),
+        ('GRID',(0,0),(-1,-1),0.5,colors.black),
+        ('BACKGROUND',(0,0),(-1,0),BG_GREY),
+        ('ALIGN',(2,1),(-1,-1),'RIGHT'),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
     ]))
     story.append(t_details)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 20))
 
     # ==========================================================================
     # 6. PERJURY DECLARATION & SIGNATORIES
@@ -203,54 +171,41 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     verified by us, and to the best of our knowledge and belief, is true and correct, pursuant to the provisions of the
     National Internal Revenue Code, as amended, and the regulations issued under authority thereof. Further, we give
     our consent to the processing of our information as contemplated under the Data Privacy Act of 2012 (R.A. No. 10173)."""
-    story.append(Paragraph(perjury_text, ParagraphStyle('Perj', parent=styles['Normal'], fontSize=6, leading=7.5, alignment=4)))
-    story.append(Spacer(1, 12))
+    story.append(Paragraph(perjury_text, ParagraphStyle('Perj', parent=styles['Normal'], fontSize=6, leading=7)))
+    story.append(Spacer(1, 20))
 
     sig_data = [
-        ["___________________________________", "___________________________________"],
+        ["__________________________", "__________________________"],
         ["MICHELLE F. BAISAC", "Payee's Authorized Representative"],
         ["Accounting Officer / TIN 239-431-789", "(Signature over Printed Name)"]
     ]
-    t_sig = Table(sig_data, colWidths=[270, 270])
-    t_sig.setStyle(TableStyle([
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-        ('FONTSIZE', (0,0), (-1,-1), 7.5),
-        ('LEADING', (0,0), (-1,-1), 9.5),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-    ]))
+    t_sig = Table(sig_data, colWidths=[270,270])
+    t_sig.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER')]))
     story.append(t_sig)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 20))
 
     # Conforme Section
     conforme_data = [
-        ["___________________________________", "___________________________________"],
+        ["__________________________", "__________________________"],
         ["Conforme", "Payee/Payor’s Authorized Representative/Tax Agent"],
         ["(Signature over Printed Name)", "(Indicate Title/Designation and TIN)"]
     ]
-    t_conforme = Table(conforme_data, colWidths=[270, 270])
-    t_conforme.setStyle(TableStyle([
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-        ('FONTSIZE', (0,0), (-1,-1), 7.5),
-        ('LEADING', (0,0), (-1,-1), 9.5),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
-    ]))
+    t_conforme = Table(conforme_data, colWidths=[270,270])
+    t_conforme.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER')]))
     story.append(t_conforme)
 
-    # Footer Note
-    story.append(Spacer(1, 8))
+    # Footer note
+    story.append(Spacer(1, 10))
     story.append(Paragraph("*NOTE: The BIR Data Privacy is in the BIR website (www.bir.gov.ph)", ParagraphStyle('FootNote', parent=styles['Normal'], fontSize=5, leading=6)))
 
     # Build PDF
     doc.build(story)
     buffer.seek(0)
-    return buffer.getvalue()
+    return buffer.getvalue() 
     # ==============================================================================
     # END OF - BIR FORM 2307 (JANUARY 2018 ENCS) OFFICIAL TEMPLATE GENERATOR
     # ==============================================================================
+
 #============================================================================Bank Reconciliation===============================
 import streamlit as st
 import pandas as pd
