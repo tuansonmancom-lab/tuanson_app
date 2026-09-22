@@ -77,7 +77,7 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         [wht_details.get('income_type',''), wht_details.get('atc',''), "-", f"{gross_amt:,.2f}", "-", f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"],
         ["Total","","","","",f"{gross_amt:,.2f}",f"{tax_amt:,.2f}"]
     ]
-    t_details = Table(data_details, colWidths=[200,60,80,80,80,100,100])
+    t_details = Table(data_details, colWidths=[270,270])
     t_details.setStyle(TableStyle([
         ('BOX',(0,0),(-1,-1),1,colors.black),
         ('GRID',(0,0),(-1,-1),0.5,colors.black),
@@ -88,14 +88,14 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         ('BOTTOMPADDING',(0,0),(-1,-1),8),
     ]))
     story.append(t_details)
-    story.append(Spacer(1, 40))
+    story.append(Spacer(1, 20))
 
     # Declaration
     signatory_text = """We declare under the penalties of perjury that this certificate has been made in good faith,
     verified by us, and to the best of our knowledge and belief, is true and correct, pursuant to the provisions of the
     National Internal Revenue Code, as amended, and the regulations issued under authority thereof."""
     story.append(Paragraph(signatory_text, styles['Normal']))
-    story.append(Spacer(1, 40))
+    story.append(Spacer(1, 20))
 
     # Signatures
     sig_data = [
