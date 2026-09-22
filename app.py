@@ -3680,31 +3680,42 @@ elif role == "Accounting":
                     with b_col2:
                         if computed_tax_withheld > 0:
                             if st.button("📄 Generate BIR 2307 PDF", key=f"btn_gen_2307_{cv_no}_{idx}"):
-                                # Fetch supplier details from Turso database before generating PDF
+                                # Use TRIM and LOWER for a flexible database lookup
                                 supp_row = conn.execute(
-                                    "SELECT tin_number, location FROM suppliers WHERE supplier_name = ?", 
+                                    "SELECT tin_number, location FROM suppliers WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))", 
                                     (supplier_name,)
                                 ).fetchone()
                                 
-                                if supp_row:
-                                    supplier_tin = supp_row[0] if supp_row[0] else "000-000-000-000"
-                                    supplier_address = supp_row[1] if supp_row[1] else "N/A"
-                                else:
-                                    supplier_tin = "000-000-000-000"
-                                    supplier_address = "N/A"
+                                supplier_tin = supp_row[0] if (supp_row and supp_row[0]) else "000-000-000-000"
+                                supplier_address = supp_row[1] if (supp_row and supp_row[1]) else "N/A"
                                 
-                                # Generate 2307 PDF
+                                # Calculate period bounds (e.g., current quarter range)
+                                today = datetime.now()
+                                q_start_month = 3 * ((today.month - 1) // 3) + 1
+                                period_from = datetime(today.year, q_start_month, 1).strftime('%m/%d/%Y')
+                                period_to = today.strftime('%m/%d/%Y')
+                            
+                                # Generate 2307 PDF with complete dictionary keys
                                 pdf_buffer = generate_bir_2307_pdf(
-                                    voucher_data={"cv_no": cv_no},
-                                    supplier_data={"name": supplier_name, "tin": supplier_tin, "address": supplier_address},
-                                    wht_details={"income_type": income_type, "atc": atc_code, "gross": new_voucher_amt, "tax": computed_tax_withheld}
-                                )   
-                                st.download_button(
-                                    label=f"📥 Download 2307 for {cv_no}",
-                                    data=pdf_buffer,
-                                    file_name=f"BIR_Form_2307_{cv_no}.pdf",
-                                    mime="application/pdf",
-                                    key=f"dl_2307_{cv_no}_{idx}"
+                                    voucher_data={
+                                        "cv_no": cv_no,
+                                        "period_from": period_from,
+                                        "period_to": period_to
+                                    },
+                                    supplier_data={
+                                        "payee_name": supplier_name,
+                                        "name": supplier_name,
+                                        "payee_tin": supplier_tin,
+                                        "tin": supplier_tin,
+                                        "payee_address": supplier_address,
+                                        "address": supplier_address
+                                    },
+                                    wht_details={
+                                        "income_type": income_type, 
+                                        "atc": atc_code, 
+                                        "gross": new_voucher_amt, 
+                                        "tax": computed_tax_withheld
+                                    }
                                 )
                     
                     if save_clicked:
