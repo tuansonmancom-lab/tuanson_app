@@ -23,37 +23,38 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     style_center = styles['Normal']
     style_center.alignment = 1 # Center align for headers
     
-    # Header Title (Fixed multiline string with tags)
     # Header Title (Fixed with triple quotes)
     header_text = """**Republic of the Philippines**
-    Department of Finance
+
+Department of Finance
 
 
-    Bureau of Internal Revenue
+Bureau of Internal Revenue
 
 
 
-    BIR Form No. 2307
+BIR Form No. 2307
 
 
-    Certificate of Creditable Tax Withheld at Source"""
-    
+Certificate of Creditable Tax Withheld at Source"""
+
 story.append(Paragraph(header_text, style_center))
 story.append(Spacer(1, 15))
 
-# Part I & II: Payee & Payor Info Table
-    # We use .get() so it doesn't break if a field is missing
-    supplier_tin = supplier_data.get('tin', '000-000-000-000')
-    supplier_name = supplier_data.get('name', 'N/A')
-    supplier_address = supplier_data.get('address', 'N/A')
-    
-    data_info = [
-        [
-            Paragraph("**Part I - Payee Information**", styles['Normal']), 
-            Paragraph("**Part II - Payor Information**", styles['Normal'])
-        ],
-        [
-            Paragraph(f"""**TIN:** {supplier_tin}
+Part I & II: Payee & Payor Info Table
+We use .get() so it doesn't break if a field is missing
+supplier_tin = supplier_data.get('tin', '000-000-000-000')
+supplier_name = supplier_data.get('name', 'N/A')
+supplier_address = supplier_data.get('address', 'N/A')
+
+data_info = [
+[
+Paragraph("Part I - Payee Information", styles['Normal']),
+Paragraph("Part II - Payor Information", styles['Normal'])
+],
+[
+Paragraph(f"""TIN: {supplier_tin}
+
 
 Payee's Name: {supplier_name}
 
@@ -69,13 +70,13 @@ Payor's Name: TUANSON CONSTRUCTION
         **Registered Address:** 162 P. Labuca St., Cansojong, Talisay City, Cebu""", styles['Normal'])
     ]
 ]
-# Indentation corrected from here downwards
+
 t_info = Table(data_info, colWidths=[270, 270])
 t_info.setStyle(TableStyle([
     ('BOX', (0,0), (-1,-1), 1, colors.black),
     ('GRID', (0,0), (-1,-1), 0.5, colors.black),
     ('VALIGN', (0,0), (-1,-1), 'TOP'),
-    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), # Gray background for headers
+    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
     ('BOTTOMPADDING', (0,0), (-1,-1), 10),
 ]))
 story.append(t_info)
@@ -96,7 +97,7 @@ t_details.setStyle(TableStyle([
     ('BOX', (0,0), (-1,-1), 1, colors.black),
     ('GRID', (0,0), (-1,-1), 0.5, colors.black),
     ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-    ('ALIGN', (1,0), (-1,-1), 'CENTER'), # Center the ATC, Amount, and Tax columns
+    ('ALIGN', (1,0), (-1,-1), 'CENTER'),
     ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ('TOPPADDING', (0,0), (-1,-1), 8),
     ('BOTTOMPADDING', (0,0), (-1,-1), 8),
@@ -133,7 +134,7 @@ doc.build(story)
 # Reset buffer cursor to the beginning
 buffer.seek(0)
 return buffer
-#=========================end of 2307 pdf generator=========================================
+#=========================end of 2307 pdf generator
 #============================================================================Bank Reconciliation===============================
 import streamlit as st
 import pandas as pd
