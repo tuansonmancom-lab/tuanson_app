@@ -51,18 +51,23 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
 
     # --- TOP HEADER ---
     story.append(
-    Paragraph(
-        "**Republic of the Philippines**
-
-Department of Finance
-
-
-Bureau of Internal Revenue",
-ParagraphStyle('SubHdr', alignment=1, fontSize=7, leading=8.5)
-)
-)
-story.append(Paragraph("Certificate of Creditable Tax Withheld at Source (BIR Form No. 2307)", style_title))
-story.append(Spacer(1, 6))
+        Paragraph(
+            "<b>Republic of the Philippines</b><br/>"
+            "Department of Finance<br/>"
+            "Bureau of Internal Revenue",
+            ParagraphStyle('SubHdr', alignment=1, fontSize=7, leading=8.5)
+        )
+    )
+    
+    # Title line
+    story.append(
+        Paragraph(
+            "Certificate of Creditable Tax Withheld at Source (BIR Form No. 2307)",
+            style_title
+        )
+    )
+    
+    story.append(Spacer(1, 6))
     
     # --- PERIOD TABLE ---
     period_text = f"**1 For the Period From:** {period_from} **To:** {period_to}"
