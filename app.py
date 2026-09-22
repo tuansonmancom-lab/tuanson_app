@@ -4174,7 +4174,7 @@ elif role == "Admin View All":
             st.write("#### 👤 Add, Edit, or Remove Users")
             users_df = pd.read_sql_query("SELECT id, username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users", conn)
             
-            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Engineering", "Accounting", "Admin View All"]
+            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Engineering", "Accounting", "HRIS / Payroll", "Admin View All"]
             yes_no_options = ["Yes", "No"]
             
             edited_users = st.data_editor(
@@ -4671,3 +4671,276 @@ elif role == "Engineering":
         else:
             st.info("No subcontractor or rental progress billings recorded yet.")
 
+#=================================================================================
+### --- ROLE: HRIS / PAYROLL (Worker Management, Timekeeping & Payroll) ---
+#=================================================================================
+elif role == "HRIS / Payroll":
+    st.subheader("👷 HRIS & Labor Payroll Dashboard")
+    st.caption("Manage worker profiles, daily timekeeping, site vale/advances, and batch payroll releases.")
+
+    if st.button("🔄 Refresh HRIS Data", key="btn_refresh_hris"):
+        st.rerun()
+
+    tab_workers, tab_timekeeping, tab_payroll = st.tabs([
+        "👤 Worker Profiles", 
+        "⏱️ Daily Timekeeping & Vale", 
+        "💵 Payroll Processing & Accounting Release"
+    ])
+
+    # -------------------------------------------------------------------------
+    # TAB 1: WORKER PROFILES MASTER
+    # -------------------------------------------------------------------------
+    with tab_workers:
+        st.write("### 👤 Register / Edit Field Workers")
+        
+        with st.form("form_add_worker", clear_on_submit=True):
+            col_w1, col_w2, col_w3 = st.columns(3)
+            worker_name = col_w1.text_input("Worker Full Name *", placeholder="e.g. Juan Dela Cruz")
+            worker_type = col_w2.selectbox("Worker Classification", ["Skilled", "Unskilled", "Foreman", "Leadman"])
+            daily_rate = col_w3.number_input("Daily Rate (₱) *", min_value=0.0, step=50.0, value=600.0)
+
+            col_w4, col_w5, col_w6 = st.columns(3)
+            sss_no = col_w4.text_input("SSS No.", placeholder="00-0000000-0")
+            philhealth_no = col_w5.text_input("PhilHealth No.", placeholder="00-000000000-0")
+            pagibig_no = col_w6.text_input("Pag-IBIG No.", placeholder="0000-0000-0000")
+
+            btn_save_worker = st.form_submit_button("💾 Register Worker", type="primary")
+
+            if btn_save_worker:
+                if not worker_name.strip():
+                    st.error("⚠️ Please enter a worker name.")
+                elif daily_rate <= 0:
+                    st.error("⚠️ Daily rate must be greater than ₱0.00.")
+                else:
+                    try:
+                        c.execute("""
+                            INSERT INTO workers (worker_name, worker_type, daily_rate, sss_no, philhealth_no, pagibig_no, status)
+                            VALUES (?, ?, ?, ?, ?, ?, 'Active')
+                        """, (worker_name.strip(), worker_type, daily_rate, sss_no.strip(), philhealth_no.strip(), pagibig_no.strip()))
+                        conn.commit()
+                        st.success(f"✅ Worker '{worker_name}' successfully registered!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"⚠️ Error registering worker: {e}")
+
+        st.markdown("---")
+        st.write("#### 📋 Registered Workers Masterlist")
+        
+        workers_df = pd.read_sql_query("""
+            SELECT id AS 'ID', worker_name AS 'Worker Name', worker_type AS 'Classification', 
+                   daily_rate AS 'Daily Rate (₱)', sss_no AS 'SSS No.', philhealth_no AS 'PhilHealth No.', 
+                   pagibig_no AS 'Pag-IBIG No.', status AS 'Status'
+            FROM workers ORDER BY id DESC
+        """, conn)
+
+        if not workers_df.empty:
+            st.dataframe(
+                workers_df.style.format({"Daily Rate (₱)": "₱{:,.2f}"}),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("No workers registered yet.")
+
+    # -------------------------------------------------------------------------
+    # TAB 2: DAILY TIMEKEEPING & VALE ENTRY
+    # -------------------------------------------------------------------------
+    with tab_timekeeping:
+        st.write("### ⏱️ Record Project Timekeeping & Vale Advances")
+
+        col_t1, col_t2 = st.columns(2)
+        
+        # Load active workers
+        worker_list = [f"{r[0]} | {r[1]} (₱{r[2]:,.2f}/day)" for r in c.execute("SELECT id, worker_name, daily_rate FROM workers WHERE status='Active'").fetchall()]
+        if not worker_list:
+            st.warning("⚠️ No active workers available. Please add workers in Worker Profiles first.")
+        else:
+            selected_worker_str = col_t1.selectbox("Select Worker", worker_list, key="tk_worker_select")
+            worker_id = int(selected_worker_str.split(" | ")[0])
+
+            # Load project sites
+            projects = [r[0] for r in c.execute("SELECT project_name FROM projects").fetchall()]
+            if not projects:
+                projects = ["General Work Site"]
+            selected_project = col_t2.selectbox("Project Site Location", projects, key="tk_proj_select")
+
+            col_t3, col_t4 = st.columns(2)
+            
+            act_query = "SELECT a.activity_name FROM activities a JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"
+            activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
+            if not activities:
+                activities = ["General Operations"]
+            selected_activity = col_t3.selectbox("Activity / Scope", activities, key="tk_act_select")
+            
+            work_date = col_t4.date_input("Work Date", value=datetime.now().date(), key="tk_work_date")
+
+            st.markdown("---")
+            st.write("#### 📊 Hours & Cash Advance (Vale)")
+
+            col_m1, col_m2, col_m3 = st.columns(3)
+            days_worked = col_m1.number_input("Days Worked", min_value=0.0, max_value=1.5, step=0.5, value=1.0, key="tk_days")
+            ot_hours = col_m2.number_input("Overtime Hours", min_value=0.0, max_value=12.0, step=0.5, value=0.0, key="tk_ot")
+            vale_amount = col_m3.number_input("Vale / Cash Advance (₱)", min_value=0.0, step=100.0, value=0.0, key="tk_vale")
+
+            if st.button("📝 Record Timekeeping Entry", type="primary", key="btn_save_timekeeping"):
+                c.execute("""
+                    INSERT INTO timekeeping (worker_id, project_name, activity_name, work_date, days_worked, ot_hours, vale_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (worker_id, selected_project, selected_activity, work_date.strftime('%Y-%m-%d'), days_worked, ot_hours, vale_amount))
+                conn.commit()
+                st.success(f"✅ Recorded timekeeping entry for {selected_worker_str.split(' | ')[1]}!")
+                st.rerun()
+
+        st.markdown("---")
+        st.write("#### 📜 Recent Unprocessed Timekeeping Logs")
+        
+        tk_df = pd.read_sql_query("""
+            SELECT t.id AS 'Log ID', t.work_date AS 'Date', w.worker_name AS 'Worker', 
+                   t.project_name AS 'Project', t.days_worked AS 'Days Worked', 
+                   t.ot_hours AS 'OT Hours', t.vale_amount AS 'Vale Amount'
+            FROM timekeeping t
+            JOIN workers w ON t.worker_id = w.id
+            ORDER BY t.id DESC LIMIT 20
+        """, conn)
+
+        if not tk_df.empty:
+            st.dataframe(
+                tk_df.style.format({"Vale Amount": "₱{:,.2f}"}),
+                use_container_width=True,
+                hide_index=True
+            )
+
+    # -------------------------------------------------------------------------
+    # TAB 3: PAYROLL PROCESSING & ACCOUNTING RELEASE
+    # -------------------------------------------------------------------------
+    with tab_payroll:
+        st.write("### 💵 Payroll Batch Summary & Accounting Release")
+
+        col_p1, col_p2 = st.columns(2)
+        start_date = col_p1.date_input("Payroll Period Start", value=datetime.now().date() - timedelta(days=7), key="pr_start")
+        end_date = col_p2.date_input("Payroll Period End", value=datetime.now().date(), key="pr_end")
+
+        payroll_period_str = f"{start_date.strftime('%Y/%m/%d')} - {end_date.strftime('%Y/%m/%d')}"
+
+        # Calculate Unprocessed Payroll Details
+        calc_query = """
+            SELECT 
+                w.id AS worker_id,
+                w.worker_name,
+                w.daily_rate,
+                SUM(t.days_worked) AS total_days,
+                SUM(t.ot_hours) AS total_ot,
+                SUM(t.vale_amount) AS total_vale
+            FROM timekeeping t
+            JOIN workers w ON t.worker_id = w.id
+            WHERE t.work_date BETWEEN ? AND ?
+            GROUP BY w.id
+        """
+        raw_payroll = c.execute(calc_query, (start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))).fetchall()
+
+        if raw_payroll:
+            payroll_rows = []
+            total_gross = 0.0
+            total_deductions = 0.0
+            total_net = 0.0
+
+            for r in raw_payroll:
+                w_id, name, rate, days, ot, vale = r
+                
+                # Formula: Basic Pay = Days Worked * Daily Rate
+                basic_pay = days * rate
+                
+                # Formula: OT Pay = OT Hours * (Daily Rate / 8 * 1.25)
+                ot_pay = ot * (rate / 8.0 * 1.25)
+                
+                gross_pay = basic_pay + ot_pay
+                deductions = vale # Add SSS / PhilHealth / Pag-IBIG deduction logic here if needed
+                net_pay = max(0.0, gross_pay - deductions)
+
+                total_gross += gross_pay
+                total_deductions += deductions
+                total_net += net_pay
+
+                payroll_rows.append({
+                    "Worker Name": name,
+                    "Daily Rate": rate,
+                    "Days Worked": days,
+                    "OT Hours": ot,
+                    "Gross Pay": gross_pay,
+                    "Less: Vale": deductions,
+                    "Net Pay": net_pay
+                })
+
+            summary_df = pd.DataFrame(payroll_rows)
+
+            st.dataframe(
+                summary_df.style.format({
+                    "Daily Rate": "₱{:,.2f}",
+                    "Gross Pay": "₱{:,.2f}",
+                    "Less: Vale": "₱{:,.2f}",
+                    "Net Pay": "₱{:,.2f}"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.info(f"""
+            📊 **Batch Payroll Total:**
+            * **Gross Payroll:** ₱{total_gross:,.2f}
+            * **Total Deductions / Vale Recovered:** -₱{total_deductions:,.2f}
+            * **NET CASH PAYROLL RELEASE:** **₱{total_net:,.2f}**
+            """)
+
+            if st.button("🚀 Submit Payroll to Accounting (APV Release)", type="primary", key="btn_submit_payroll"):
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                suggested_apv = generate_voucher_number(c, "apv_number", "APV")
+                doc_ref = f"PAYROLL#{start_date.strftime('%m%d')}-{end_date.strftime('%m%d')}"
+
+                # 1. Record Header Entry in Deliveries for Accounting Queue
+                c.execute("""
+                    INSERT INTO deliveries 
+                    (pono, supplier, project_name, dr_number, total_amount, received_date, payment_status, apv_number, apv_date)
+                    VALUES (?, 'Direct Labor Payroll', 'Multiple Projects', ?, ?, ?, 'Unpaid', ?, ?)
+                """, (
+                    f"PAY-{start_date.strftime('%Y%m%d')}", 
+                    doc_ref, 
+                    total_net, 
+                    current_time, 
+                    suggested_apv, 
+                    current_time
+                ))
+
+                # 2. Record Double-Entry General Ledger Postings
+                # Debit: Direct Labor Expense (Gross Amount)
+                c.execute("""
+                    INSERT INTO journal_entries 
+                    (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name, supplier)
+                    VALUES (?, ?, '60100', 'Direct Labor Expense', ?, 0.0, ?, ?, 'Multiple Projects', 'Direct Labor Payroll')
+                """, (current_time, suggested_apv, total_gross, doc_ref, f"Labor Payroll for period {payroll_period_str}"))
+
+                # Credit: Accounts Payable-Payroll / Trade (Net Release)
+                c.execute("""
+                    INSERT INTO journal_entries 
+                    (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name, supplier)
+                    VALUES (?, ?, '20100', 'Accounts Payable-Trade', 0.0, ?, ?, ?, 'Multiple Projects', 'Direct Labor Payroll')
+                """, (current_time, suggested_apv, total_net, doc_ref, f"Net payroll payable for period {payroll_period_str}"))
+
+                # Credit: Advances to Workers / Vale Recovered (Deductions)
+                if total_deductions > 0:
+                    c.execute("""
+                        INSERT INTO journal_entries 
+                        (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name, supplier)
+                        VALUES (?, ?, '10300', 'Advances to Workers / Vale', 0.0, ?, ?, ?, 'Multiple Projects', 'Direct Labor Payroll')
+                    """, (current_time, suggested_apv, total_deductions, doc_ref, f"Vale deductions recovered for period {payroll_period_str}"))
+
+                # 3. Log Payroll Batch Entry
+                c.execute("""
+                    INSERT INTO payroll_runs (payroll_period, total_gross, total_deductions, total_net, status)
+                    VALUES (?, ?, ?, ?, 'Submitted to Accounting')
+                """, (payroll_period_str, total_gross, total_deductions, total_net))
+
+                conn.commit()
+                st.success(f"✅ Payroll Batch ({doc_ref}) submitted! Created APV #{suggested_apv} for ₱{total_net:,.2f}.")
+                st.rerun()
+        else:
+            st.info("No unbilled timekeeping entries found for the selected date range.")
