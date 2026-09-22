@@ -945,6 +945,45 @@ def init_db():
             status TEXT DEFAULT 'Completed'
         )
     ''')
+    # --- HRIS / PAYROLL TABLES INITIALIZATION ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS workers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            worker_name TEXT UNIQUE NOT NULL,
+            worker_type TEXT,           -- Skilled, Unskilled, Foreman
+            daily_rate REAL NOT NULL,
+            sss_no TEXT,
+            philhealth_no TEXT,
+            pagibig_no TEXT,
+            status TEXT DEFAULT 'Active'
+        )
+    """)
+    
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS timekeeping (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            worker_id INTEGER,
+            project_name TEXT,
+            activity_name TEXT,
+            work_date TEXT,
+            days_worked REAL DEFAULT 1.0,
+            ot_hours REAL DEFAULT 0.0,
+            vale_amount REAL DEFAULT 0.0,
+            FOREIGN KEY(worker_id) REFERENCES workers(id)
+        )
+    """)
+    
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS payroll_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payroll_period TEXT,
+            total_gross REAL,
+            total_deductions REAL,
+            total_net REAL,
+            status TEXT DEFAULT 'Pending Approval'
+        )
+    """)
+#========================end of HRIS===================
 
     # --- AUTO-MIGRATIONS FOR EXISTING DATABASES ---
     for col in ["location", "contact_person", "contact_number", "tin_number", "vat_type"]:
