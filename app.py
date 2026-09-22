@@ -4135,7 +4135,7 @@ elif role == "Admin View All":
             st.write("#### 👤 Add, Edit, or Remove Users")
             users_df = pd.read_sql_query("SELECT id, username, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users", conn)
             
-            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Accounting", "Admin View All"]
+            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Engineering", "Accounting", "Admin View All"]
             yes_no_options = ["Yes", "No"]
             
             edited_users = st.data_editor(
