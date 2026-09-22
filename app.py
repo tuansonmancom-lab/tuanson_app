@@ -3715,8 +3715,8 @@ elif role == "Accounting":
                     
                     with b_col2:
                         if computed_tax_withheld > 0:
-                            if st.button("📄 Generate BIR 2307 PDF", key=f"btn_gen_2307_{cv_no}_{idx}"):
-                                # Use TRIM and LOWER for a flexible database lookup
+                            try:
+                                # 1. Fetch supplier details using flexible TRIM/LOWER matching
                                 supp_row = conn.execute(
                                     "SELECT tin_number, location FROM suppliers WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))", 
                                     (supplier_name,)
@@ -3725,13 +3725,13 @@ elif role == "Accounting":
                                 supplier_tin = supp_row[0] if (supp_row and supp_row[0]) else "000-000-000-000"
                                 supplier_address = supp_row[1] if (supp_row and supp_row[1]) else "N/A"
                                 
-                                # Calculate period bounds (e.g., current quarter range)
+                                # 2. Compute tax period bounds (current quarter)
                                 today = datetime.now()
                                 q_start_month = 3 * ((today.month - 1) // 3) + 1
                                 period_from = datetime(today.year, q_start_month, 1).strftime('%m/%d/%Y')
                                 period_to = today.strftime('%m/%d/%Y')
-                            
-                                # Generate 2307 PDF with complete dictionary keys
+                
+                                # 3. Generate 2307 PDF Buffer directly
                                 pdf_buffer = generate_bir_2307_pdf(
                                     voucher_data={
                                         "cv_no": cv_no,
@@ -3753,6 +3753,18 @@ elif role == "Accounting":
                                         "tax": computed_tax_withheld
                                     }
                                 )
+                
+                                # 4. Direct 1-Click Download Button
+                                st.download_button(
+                                    label=f"📄 Download 2307 PDF ({cv_no})",
+                                    data=pdf_buffer,
+                                    file_name=f"BIR_Form_2307_{cv_no}.pdf",
+                                    mime="application/pdf",
+                                    key=f"dl_2307_{cv_no}_{idx}",
+                                    use_container_width=True
+                                )
+                            except Exception as pdf_err:
+                                st.error(f"⚠️ Could not build BIR 2307 PDF: {pdf_err}")
                     
                     if save_clicked:
                         try:
