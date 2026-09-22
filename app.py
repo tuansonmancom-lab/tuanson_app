@@ -188,32 +188,31 @@ def render_bank_reconciliation_tab(conn):
     with btn_col1:
         if st.button("💾 Finalize & Save Bank Reconciliation Snapshot", type="primary"):
             try:
-                conn = get_db_connection()
-                c = conn.cursor()
+                # Use the existing conn passed to the function, or grab a fresh one if needed
+                c_save = conn.cursor()
         
                 # 1. Update cleared checks in floating_checks table
                 if 'edited_df' in locals() and not edited_df.empty:
                     for _, row in edited_df.iterrows():
-                        if row.get("Cleared?"):
-                            cleared_date = str(row.get("Passbook Clearing Date", datetime.date.today()))
+                        if row.get("Mark Cleared"):
+                            cleared_date = str(row.get("Passbook Clearing Date", date.today()))
                             check_no = str(row.get("Check No", ""))
                             
-                            # Try updating with cleared_at, fallback to status-only if column doesn't exist
                             try:
-                                c.execute("""
+                                c_save.execute("""
                                     UPDATE floating_checks 
                                     SET status = 'Cleared', cleared_at = ? 
                                     WHERE check_no = ?
                                 """, (cleared_date, check_no))
                             except Exception:
-                                c.execute("""
+                                c_save.execute("""
                                     UPDATE floating_checks 
                                     SET status = 'Cleared' 
                                     WHERE check_no = ?
                                 """, (check_no,))
         
                 # 2. Save snapshot to bank_reconciliations table
-                c.execute("""
+                c_save.execute("""
                     INSERT INTO bank_reconciliations (
                         reconciliation_date,
                         account_code,
@@ -227,20 +226,19 @@ def render_bank_reconciliation_tab(conn):
                         status
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    datetime.date.today().strftime("%Y-%m-%d"),
-                    selected_account_code if 'selected_account_code' in locals() else '10330',
-                    selected_account_name if 'selected_account_name' in locals() else 'Cash in Bank BDO',
-                    float(gl_balance) if 'gl_balance' in locals() else 0.0,
-                    float(bank_statement_balance) if 'bank_statement_balance' in locals() else 0.0,
-                    float(total_outstanding) if 'total_outstanding' in locals() else 0.0,
+                    date.today().strftime("%Y-%m-%d"),
+                    selected_acct_code,
+                    selected_account_str,
+                    float(gl_book_balance),
+                    float(statement_ending_balance),
+                    float(total_outstanding_amt),
                     0.0,
-                    float(adjusted_bank_balance) if 'adjusted_bank_balance' in locals() else 0.0,
-                    float(discrepancy) if 'discrepancy' in locals() else 0.0,
+                    float(adjusted_bank_balance),
+                    float(out_of_balance_variance),
                     'Completed'
                 ))
         
                 conn.commit()
-                conn.close()
                 
                 st.success("Reconciliation snapshot saved successfully!")
                 st.rerun()
