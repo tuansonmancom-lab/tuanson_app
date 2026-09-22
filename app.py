@@ -3569,11 +3569,25 @@ elif role == "Accounting":
                         if computed_tax_withheld > 0:
                             if st.button("📄 Generate BIR 2307 PDF", key=f"btn_gen_2307_{cv_no}_{idx}"):
                                 # Call your PDF generator buffer helper here
+                                # Fetch supplier details from Turso database before generating PDF
+                                supp_row = conn.execute(
+                                    "SELECT tin_number, location FROM suppliers WHERE supplier_name = ?", 
+                                    (supplier_name,)
+                                ).fetchone()
+                                
+                                if supp_row:
+                                    supplier_tin = supp_row[0] if supp_row[0] else "000-000-000-000"
+                                    supplier_address = supp_row[1] if supp_row[1] else "N/A"
+                                else:
+                                    supplier_tin = "000-000-000-000"
+                                    supplier_address = "N/A"
+                                
+                                # Generate 2307 PDF
                                 pdf_buffer = generate_bir_2307_pdf(
                                     voucher_data={"cv_no": cv_no},
                                     supplier_data={"name": supplier_name, "tin": supplier_tin, "address": supplier_address},
                                     wht_details={"income_type": income_type, "atc": atc_code, "gross": new_voucher_amt, "tax": computed_tax_withheld}
-                                )
+                                )   
                                 st.download_button(
                                     label=f"📥 Download 2307 for {cv_no}",
                                     data=pdf_buffer,
