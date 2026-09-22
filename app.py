@@ -3600,7 +3600,7 @@ elif role == "Accounting":
                         step=100.0, 
                         key=f"edit_amt_val_{cv_no}_{idx}"
                     )
-                
+                    
                     discount_amt = col_e2.number_input(
                         "Discount / Rebate (₱)", 
                         min_value=0.0, 
@@ -3614,15 +3614,15 @@ elif role == "Accounting":
                         value=str(c_num or ''), 
                         key=f"edit_chk_no_{cv_no}_{idx}"
                     )
-                
+                    
                     col_e4, col_e5 = st.columns(2)
-                
+                    
                     # Safely parse current check date for date picker default
                     try:
                         init_date = pd.to_datetime(c_date).date() if c_date else datetime.now().date()
                     except Exception:
                         init_date = datetime.now().date()
-                
+                    
                     new_check_date = col_e4.date_input(
                         "Cheque Date", 
                         value=init_date, 
@@ -3634,7 +3634,7 @@ elif role == "Accounting":
                         value=(not bool(c_date)), 
                         key=f"blank_dt_{cv_no}_{idx}"
                     )
-                
+                    
                     st.markdown("---")
                     
                     # --- BIR FORM 2307 WITHHOLDING TAX OPTIONS ---
@@ -3644,7 +3644,7 @@ elif role == "Accounting":
                         options=["0% (None)", "1% (Goods - WI158)", "2% (Services - WI160)"],
                         key=f"edit_wht_opt_{cv_no}_{idx}"
                     )
-                
+                    
                     # Map selection to rates and ATCs
                     if "1%" in wht_option:
                         wht_rate = 0.01
@@ -3658,29 +3658,28 @@ elif role == "Accounting":
                         wht_rate = 0.0
                         atc_code = ""
                         income_type = ""
-                
-                    computed_tax_withheld = new_voucher_amt * wht_rate
+                    
+                    computed_tax_withheld = round(new_voucher_amt * wht_rate, 2)
                     
                     # Net Disbursement accounts for Gross minus Discount minus Tax Withheld (Check amount)
-                    net_disbursement = max(0.0, new_voucher_amt - discount_amt - computed_tax_withheld)
+                    net_disbursement = max(0.0, round(new_voucher_amt - discount_amt - computed_tax_withheld, 2))
                     
                     col_w2.metric("Computed Tax Withheld (2307)", f"₱{computed_tax_withheld:,.2f}")
-                
+                    
                     if discount_amt > 0 or computed_tax_withheld > 0:
                         st.info(f"💡 **Summary:** Gross: ₱{new_voucher_amt:,.2f} | Less Discount: ₱{discount_amt:,.2f} | Less 2307 Tax: ₱{computed_tax_withheld:,.2f} | **Net Check Disbursement: ₱{net_disbursement:,.2f}**")
-                
+                    
                     st.markdown("")
                     
                     # Action Buttons layout inside expander
                     b_col1, b_col2 = st.columns([1, 1])
-                
+                    
                     with b_col1:
                         save_clicked = st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{idx}", type="primary")
-                
+                    
                     with b_col2:
                         if computed_tax_withheld > 0:
                             if st.button("📄 Generate BIR 2307 PDF", key=f"btn_gen_2307_{cv_no}_{idx}"):
-                                # Call your PDF generator buffer helper here
                                 # Fetch supplier details from Turso database before generating PDF
                                 supp_row = conn.execute(
                                     "SELECT tin_number, location FROM suppliers WHERE supplier_name = ?", 
@@ -3707,7 +3706,7 @@ elif role == "Accounting":
                                     mime="application/pdf",
                                     key=f"dl_2307_{cv_no}_{idx}"
                                 )
-                
+                    
                     if save_clicked:
                         try:
                             formatted_chk_date = "" if is_blank_dt else new_check_date.strftime('%Y-%m-%d')
@@ -3720,7 +3719,7 @@ elif role == "Accounting":
                             
                             # 3. Manage 50200 Purchase Discounts account
                             has_disc_entry = c.execute("SELECT COUNT(*) FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,)).fetchone()[0] > 0
-                
+                            
                             if discount_amt > 0:
                                 if has_disc_entry:
                                     c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND account_code = '50200'", (discount_amt, cv_no))
@@ -3729,7 +3728,7 @@ elif role == "Accounting":
                                     ref_val = existing_ref[0] if existing_ref else cv_no
                                     proj_val = existing_ref[1] if existing_ref else ""
                                     now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                
+                                    
                                     c.execute("""
                                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                                         VALUES (?, ?, '50200', 'Purchase Discounts', 0.0, ?, ?, ?, ?)
@@ -3737,10 +3736,10 @@ elif role == "Accounting":
                             else:
                                 if has_disc_entry:
                                     c.execute("DELETE FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,))
-                
-                            # 4. Manage Withholding Tax Payable account (e.g., Code 20400) if 2307 is applied
+                            
+                            # 4. Manage Withholding Tax Payable account (Code 20400) if 2307 is applied
                             has_wht_entry = c.execute("SELECT COUNT(*) FROM journal_entries WHERE voucher_no = ? AND account_code = '20400'", (cv_no,)).fetchone()[0] > 0
-                
+                            
                             if computed_tax_withheld > 0:
                                 if has_wht_entry:
                                     c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, cv_no))
@@ -3749,7 +3748,7 @@ elif role == "Accounting":
                                     ref_val = existing_ref[0] if existing_ref else cv_no
                                     proj_val = existing_ref[1] if existing_ref else ""
                                     now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                
+                                    
                                     c.execute("""
                                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                                         VALUES (?, ?, '20400', 'Withholding Tax Payable - Expanded', 0.0, ?, ?, ?, ?)
@@ -3757,7 +3756,7 @@ elif role == "Accounting":
                             else:
                                 if has_wht_entry:
                                     c.execute("DELETE FROM journal_entries WHERE voucher_no = ? AND account_code = '20400'", (cv_no,))
-                
+                            
                             # 5. Update Deliveries table (Gross APV amount preserved)
                             c.execute("""
                                 UPDATE deliveries 
@@ -3772,12 +3771,29 @@ elif role == "Accounting":
                                 WHERE cv_number = ?
                             """, (new_voucher_amt, new_check_no.strip(), formatted_chk_date, cv_no))
                             
-                            # 7. Update Floating Checks register (Check issued for Net Amount after discount & WHT)
+                            # 7. Update Floating Checks register with full Gross, Tax, Discount & Net Amount
                             c.execute("""
                                 UPDATE floating_checks 
-                                SET amount = ?, check_no = ?, check_date = ? 
+                                SET gross_amount = ?,
+                                    discount_amount = ?,
+                                    wht_rate = ?,
+                                    wht_atc = ?,
+                                    wht_amount = ?,
+                                    amount = ?, 
+                                    check_no = ?, 
+                                    check_date = ? 
                                 WHERE voucher_no = ?
-                            """, (net_disbursement, new_check_no.strip(), formatted_chk_date, cv_no))
+                            """, (
+                                new_voucher_amt, 
+                                discount_amt, 
+                                wht_rate, 
+                                atc_code, 
+                                computed_tax_withheld, 
+                                net_disbursement, 
+                                new_check_no.strip(), 
+                                formatted_chk_date, 
+                                cv_no
+                            ))
                             
                             conn.commit()
                             st.success(f"🎉 Updated {cv_no}! Gross: ₱{new_voucher_amt:,.2f}, Discount: ₱{discount_amt:,.2f}, 2307 Tax: ₱{computed_tax_withheld:,.2f}, Net Check: ₱{net_disbursement:,.2f}")
