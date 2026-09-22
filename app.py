@@ -57,7 +57,7 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
         [Paragraph(f"TIN: {supplier_tin}<br/>Name: {supplier_name}<br/>Address: {supplier_address}<br/>ZIP: {supplier_zip}", styles['Normal']),
          Paragraph("TIN: 908-376-188-000<br/>Name: TUANSON CONSTRUCTION<br/>Address: 162 P. Labuca St., Cansojong, Talisay City<br/>ZIP: 6045", styles['Normal'])]
     ]
-    t_info = Table(data_info, colWidths=[270,270])
+    t_info = Table(data_info, colWidths=[200,60,80,80,80,100,100])
     t_info.setStyle(TableStyle([
         ('BOX',(0,0),(-1,-1),1,colors.black),
         ('GRID',(0,0),(-1,-1),0.5,colors.black),
