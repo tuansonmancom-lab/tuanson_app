@@ -5,12 +5,13 @@ import re
 import os
 from datetime import datetime
 from io import BytesIO
+
 #=============================================2307 pdf generator===========================
 import io
 from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
 
 def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     buffer = io.BytesIO()
@@ -19,120 +20,132 @@ def generate_bir_2307_pdf(voucher_data, supplier_data, wht_details):
     
     # Simple styling to mimic BIR Form 2307 layout blocks
     styles = getSampleStyleSheet()
+    style_center = styles['Normal']
+    style_center.alignment = 1 # Center align for headers
     
-    # Header Title
-    story.append(Paragraph("**Republic of the Philippines**
-                           "
-                            "Department of Finance
-                            
-                            
-                            "
-                            "Bureau of Internal Revenue
-                            
-                            
-                            
-                            "
-                            "BIR Form No. 2307
-                            
-                            
-                            "
-                            "Certificate of Creditable Tax Withheld at Source"
-                            )
-    # Part I & II: Payee & Payor Info Table
-    # We use .get() so it doesn't break if a field is missing
-    supplier_tin = supplier_data.get('tin', '000-000-000-000')
-    supplier_name = supplier_data.get('name', 'N/A')
-    supplier_address = supplier_data.get('address', 'N/A')
-    
-    data_info = [
-        [
-            Paragraph("**Part I - Payee Information**", styles['Normal']), 
-            Paragraph("**Part II - Payor Information**", styles['Normal'])
-        ],
-        [
-            Paragraph(f"**TIN:** {supplier_tin}             
-            "
-            f"Payee's Name: {supplier_name}
-            
-            
-            "
-            f"Registered Address: {supplier_address}", styles['Normal']),
-            Paragraph(f"TIN: 908-376-188-000
-            
-            
-            "
-            f"Payor's Name: TUANSON CONSTRUCTION
-            
-            
-            "
-            f"Registered Address: 162 P. Labuca St., Cansojong, Talisay City, Cebu", styles['Normal'])
-            ]
-            ]
-            
-            t_info = Table(data_info, colWidths=[270, 270])
-            t_info.setStyle(TableStyle([
-                ('BOX', (0,0), (-1,-1), 1, colors.black),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), # Gray background for headers
-                ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-            ]))
-            story.append(t_info)
-            story.append(Spacer(1, 20))
-            
-            # Part III: Details of Income Payments and Taxes Withheld
-            gross_amt = wht_details.get('gross', 0.0)
-            tax_amt = wht_details.get('tax', 0.0)
-            
-            data_details = [
-                ["Income Payments Subject to\nExpanded Withholding Tax", "ATC", "Amount of Income\nPayment", "Tax Withheld for\nthe Quarter"],
-                [wht_details.get('income_type', ''), wht_details.get('atc', ''), f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"],
-                ["**Total**", "", f"**{gross_amt:,.2f}**", f"**{tax_amt:,.2f}**"]
-            ]
-            
-            t_details = Table(data_details, colWidths=[200, 60, 140, 140])
-            t_details.setStyle(TableStyle([
-                ('BOX', (0,0), (-1,-1), 1, colors.black),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                ('ALIGN', (1,0), (-1,-1), 'CENTER'), # Center the ATC, Amount, and Tax columns
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('TOPPADDING', (0,0), (-1,-1), 8),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-            ]))
-            story.append(t_details)
-            story.append(Spacer(1, 40))
-            
-            # Signatories Section
-            signatory_text = """
-            We declare under the penalties of perjury that this certificate has been made in good faith, verified by us, 
-            and to the best of our knowledge and belief, is true and correct, pursuant to the provisions of the National 
-            Internal Revenue Code, as amended, and the regulations issued under authority thereof.
-            """
-            story.append(Paragraph(signatory_text, styles['Normal']))
-            story.append(Spacer(1, 40))
-            
-            # Signature Lines
-            sig_data = [
-                ["___________________________________________________", "___________________________________________________"],
-                ["**MICHELLE F. BAISAC**", "**Payee's Authorized Representative**"],
-                ["Accounting Officer / TIN 239-431-789", "(Signature over Printed Name)"]
-            ]
-            
-            t_sig = Table(sig_data, colWidths=[270, 270])
-            t_sig.setStyle(TableStyle([
-                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ]))
-            story.append(t_sig)
-            
-            # Build the PDF
-            doc.build(story)
-            
-            # Reset buffer cursor to the beginning
-            buffer.seek(0)
-            return buffer
-#=============================================end of 2307 pdf generator====================
+    # Header Title (Fixed multiline string with 
+
+tags)
+header_text = (
+"Republic of the Philippines
+
+
+"
+"Department of Finance
+
+
+"
+"Bureau of Internal Revenue
+
+
+
+"
+"BIR Form No. 2307
+
+
+"
+"Certificate of Creditable Tax Withheld at Source"
+)
+story.append(Paragraph(header_text, style_center))
+story.append(Spacer(1, 15))
+
+# Part I & II: Payee & Payor Info Table
+# We use .get() so it doesn't break if a field is missing
+supplier_tin = supplier_data.get('tin', '000-000-000-000')
+supplier_name = supplier_data.get('name', 'N/A')
+supplier_address = supplier_data.get('address', 'N/A')
+
+data_info = [
+    [
+        Paragraph("**Part I - Payee Information**", styles['Normal']), 
+        Paragraph("**Part II - Payor Information**", styles['Normal'])
+    ],
+    [
+        Paragraph(f"**TIN:** {supplier_tin}
+
+"
+f"Payee's Name: {supplier_name}
+
+
+"
+f"Registered Address: {supplier_address}", styles['Normal']),
+Paragraph(f"TIN: 908-376-188-000
+
+
+"
+f"Payor's Name: TUANSON CONSTRUCTION
+
+
+"
+f"Registered Address: 162 P. Labuca St., Cansojong, Talisay City, Cebu", styles['Normal'])
+]
+]
+
+# Indentation corrected from here downwards
+t_info = Table(data_info, colWidths=[270, 270])
+t_info.setStyle(TableStyle([
+    ('BOX', (0,0), (-1,-1), 1, colors.black),
+    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+    ('VALIGN', (0,0), (-1,-1), 'TOP'),
+    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), # Gray background for headers
+    ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+]))
+story.append(t_info)
+story.append(Spacer(1, 20))
+
+# Part III: Details of Income Payments and Taxes Withheld
+gross_amt = wht_details.get('gross', 0.0)
+tax_amt = wht_details.get('tax', 0.0)
+
+data_details = [
+    ["Income Payments Subject to\nExpanded Withholding Tax", "ATC", "Amount of Income\nPayment", "Tax Withheld for\nthe Quarter"],
+    [wht_details.get('income_type', ''), wht_details.get('atc', ''), f"{gross_amt:,.2f}", f"{tax_amt:,.2f}"],
+    ["**Total**", "", f"**{gross_amt:,.2f}**", f"**{tax_amt:,.2f}**"]
+]
+
+t_details = Table(data_details, colWidths=[200, 60, 140, 140])
+t_details.setStyle(TableStyle([
+    ('BOX', (0,0), (-1,-1), 1, colors.black),
+    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+    ('ALIGN', (1,0), (-1,-1), 'CENTER'), # Center the ATC, Amount, and Tax columns
+    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ('TOPPADDING', (0,0), (-1,-1), 8),
+    ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+]))
+story.append(t_details)
+story.append(Spacer(1, 40))
+
+# Signatories Section
+signatory_text = """
+We declare under the penalties of perjury that this certificate has been made in good faith, verified by us, 
+and to the best of our knowledge and belief, is true and correct, pursuant to the provisions of the National 
+Internal Revenue Code, as amended, and the regulations issued under authority thereof.
+"""
+story.append(Paragraph(signatory_text, styles['Normal']))
+story.append(Spacer(1, 40))
+
+# Signature Lines
+sig_data = [
+    ["___________________________________________________", "___________________________________________________"],
+    ["**MICHELLE F. BAISAC**", "**Payee's Authorized Representative**"],
+    ["Accounting Officer / TIN 239-431-789", "(Signature over Printed Name)"]
+]
+
+t_sig = Table(sig_data, colWidths=[270, 270])
+t_sig.setStyle(TableStyle([
+    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+    ('VALIGN', (0,0), (-1,-1), 'TOP'),
+]))
+story.append(t_sig)
+
+# Build the PDF
+doc.build(story)
+
+# Reset buffer cursor to the beginning
+buffer.seek(0)
+return buffer
+#=========================end of 2307 pdf generator=========================================
 #============================================================================Bank Reconciliation===============================
 import streamlit as st
 import pandas as pd
