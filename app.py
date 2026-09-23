@@ -2231,7 +2231,7 @@ if role == "Requisitor":
                         AND email != '' 
                         AND (role1 = 'Purchaser' OR role2 = 'Purchaser' OR role3 = 'Purchaser' 
                              OR role4 = 'Purchaser' OR role5 = 'Purchaser' OR role6 = 'Purchaser')""")
-                    .fetchall()
+                        .fetchall()
         
                     requester_name = st.session_state.get('username', 'A Requisitor')
         
