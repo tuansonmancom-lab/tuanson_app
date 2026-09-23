@@ -4261,62 +4261,62 @@ elif role == "Admin View All":
     with tab_settings:
         st.write("### ⚙️ Admin Settings & Configuration")
         
-            with st.expander("👥 Manage System Users"):
-                st.write("#### 👤 Add, Edit, or Remove Users")
-                users_df = pd.read_sql_query("SELECT id, username, email, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users", conn)
-                
-                role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Engineering", "Accounting", "HRIS / Payroll", "Admin View All"]
-                yes_no_options = ["Yes", "No"]
-                
-                edited_users = st.data_editor(
-                    users_df,
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "id": None, 
-                        "username": st.column_config.TextColumn("Username", required=True),
-                        "email": st.column_config.TextColumn("Email Address", help="User's email for workflow alerts"),
-                        "password": st.column_config.TextColumn("Password", required=True),
-                        "role1": st.column_config.SelectboxColumn("Role 1", options=role_options),
-                        "role2": st.column_config.SelectboxColumn("Role 2", options=role_options),
-                        "role3": st.column_config.SelectboxColumn("Role 3", options=role_options),
-                        "role4": st.column_config.SelectboxColumn("Role 4", options=role_options),
-                        "role5": st.column_config.SelectboxColumn("Role 5", options=role_options),
-                        "role6": st.column_config.SelectboxColumn("Role 6", options=role_options),
-                        "status": st.column_config.SelectboxColumn("Status", options=["Active", "Inactive"], default="Active"),
-                        "can_add_act": st.column_config.SelectboxColumn("Can Add Act?", options=yes_no_options, default="No"),
-                        "can_add_item": st.column_config.SelectboxColumn("Can Add Item?", options=yes_no_options, default="No")
-                    }
-                )
-                
-                if st.button("💾 Save User Changes", type="primary"):
-                    c.execute("DELETE FROM users")
-                    for _, row in edited_users.iterrows():
-                        username_val = str(row['username']).strip() if pd.notnull(row['username']) else ""
-                        if username_val:
-                            email_val = str(row.get('email', '')).strip() if pd.notnull(row.get('email')) else ''
-                            r1 = str(row.get('role1', '')) if pd.notnull(row.get('role1')) else ''
-                            r2 = str(row.get('role2', '')) if pd.notnull(row.get('role2')) else ''
-                            r3 = str(row.get('role3', '')) if pd.notnull(row.get('role3')) else ''
-                            r4 = str(row.get('role4', '')) if pd.notnull(row.get('role4')) else ''
-                            r5 = str(row.get('role5', '')) if pd.notnull(row.get('role5')) else ''
-                            r6 = str(row.get('role6', '')) if pd.notnull(row.get('role6')) else ''
-                            status = str(row.get('status', 'Active')) if pd.notnull(row.get('status')) else 'Active'
-                            can_add_act = str(row.get('can_add_act', 'No')) if pd.notnull(row.get('can_add_act')) else 'No'
-                            can_add_item = str(row.get('can_add_item', 'No')) if pd.notnull(row.get('can_add_item')) else 'No'
-                            pwd = str(row.get('password', '1234')) if pd.notnull(row.get('password')) else '1234'
-                            
-                            c.execute("""
-                                INSERT INTO users (username, email, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                username_val, email_val, pwd, 
-                                r1, r2, r3, r4, r5, r6, status, can_add_act, can_add_item
-                            ))
-                    conn.commit()
-                    st.success("User database updated successfully!")
-                    st.rerun()
+        with st.expander("👥 Manage System Users"):
+            st.write("#### 👤 Add, Edit, or Remove Users")
+            users_df = pd.read_sql_query("SELECT id, username, email, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users", conn)
+            
+            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Engineering", "Accounting", "HRIS / Payroll", "Admin View All"]
+            yes_no_options = ["Yes", "No"]
+            
+            edited_users = st.data_editor(
+                users_df,
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "id": None, 
+                    "username": st.column_config.TextColumn("Username", required=True),
+                    "email": st.column_config.TextColumn("Email Address", help="User's email for workflow alerts"),
+                    "password": st.column_config.TextColumn("Password", required=True),
+                    "role1": st.column_config.SelectboxColumn("Role 1", options=role_options),
+                    "role2": st.column_config.SelectboxColumn("Role 2", options=role_options),
+                    "role3": st.column_config.SelectboxColumn("Role 3", options=role_options),
+                    "role4": st.column_config.SelectboxColumn("Role 4", options=role_options),
+                    "role5": st.column_config.SelectboxColumn("Role 5", options=role_options),
+                    "role6": st.column_config.SelectboxColumn("Role 6", options=role_options),
+                    "status": st.column_config.SelectboxColumn("Status", options=["Active", "Inactive"], default="Active"),
+                    "can_add_act": st.column_config.SelectboxColumn("Can Add Act?", options=yes_no_options, default="No"),
+                    "can_add_item": st.column_config.SelectboxColumn("Can Add Item?", options=yes_no_options, default="No")
+                }
+            )
+            
+            if st.button("💾 Save User Changes", type="primary"):
+                c.execute("DELETE FROM users")
+                for _, row in edited_users.iterrows():
+                    username_val = str(row['username']).strip() if pd.notnull(row['username']) else ""
+                    if username_val:
+                        email_val = str(row.get('email', '')).strip() if pd.notnull(row.get('email')) else ''
+                        r1 = str(row.get('role1', '')) if pd.notnull(row.get('role1')) else ''
+                        r2 = str(row.get('role2', '')) if pd.notnull(row.get('role2')) else ''
+                        r3 = str(row.get('role3', '')) if pd.notnull(row.get('role3')) else ''
+                        r4 = str(row.get('role4', '')) if pd.notnull(row.get('role4')) else ''
+                        r5 = str(row.get('role5', '')) if pd.notnull(row.get('role5')) else ''
+                        r6 = str(row.get('role6', '')) if pd.notnull(row.get('role6')) else ''
+                        status = str(row.get('status', 'Active')) if pd.notnull(row.get('status')) else 'Active'
+                        can_add_act = str(row.get('can_add_act', 'No')) if pd.notnull(row.get('can_add_act')) else 'No'
+                        can_add_item = str(row.get('can_add_item', 'No')) if pd.notnull(row.get('can_add_item')) else 'No'
+                        pwd = str(row.get('password', '1234')) if pd.notnull(row.get('password')) else '1234'
+                        
+                        c.execute("""
+                            INSERT INTO users (username, email, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            username_val, email_val, pwd, 
+                            r1, r2, r3, r4, r5, r6, status, can_add_act, can_add_item
+                        ))
+                conn.commit()
+                st.success("User database updated successfully!")
+                st.rerun()
 
         with st.expander("➕ Add New Project"):
             new_proj = st.text_input("Project Name")
