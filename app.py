@@ -1544,14 +1544,30 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(t_part)
     story.append(Spacer(1, 10))
 
-    # Amount in Words
-    amt_words = f"PHILIPPINE PESO {total_amt:,.2f}"
+    # --- 4. AMOUNT IN WORDS & DYNAMIC NET TOTAL SUMMARY ---
+    try:
+        amt_words = amount_to_words(total_amt)
+    except Exception:
+        amt_words = f"PHILIPPINE PESO {total_amt:,.2f}"
+    
+    # Compute 1% WHT deduction
+    wht_amt = gross_total_debit * 0.01
+    net_total = gross_total_debit - wht_amt
+    
+    r_align_style = ParagraphStyle('RAlign', parent=body_norm, alignment=2)
+    
     words_data = [
         [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm),
-         Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f}<br/>NET TOTAL PHP: ₱{total_amt:,.2f}", body_norm)]
+         Paragraph(f"SUB TOTAL: ₱{gross_total_debit:,.2f}<br/>"
+                   f"2307 TAX (1%): ₱{wht_amt:,.2f}<br/>"
+                   f"NET TOTAL PHP: ₱{net_total:,.2f}", r_align_style)]
     ]
     t_words = Table(words_data, colWidths=[360, 180])
-    t_words.setStyle(TableStyle([('BOX',(0,0),(-1,-1),1,colors.black)]))
+    t_words.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
     story.append(t_words)
     story.append(Spacer(1, 40))
 
