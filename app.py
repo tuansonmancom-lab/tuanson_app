@@ -1458,6 +1458,7 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     return buffer.getvalue()
 
 # --- CV PDF GENERATOR FUNCTION ---
+# --- CV PDF GENERATOR FUNCTION (Corrected with APV + 1% WHT) ---
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
     import os
     from reportlab.lib.pagesizes import letter
@@ -1511,7 +1512,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
             pass
 
     supplier_box_html = f"<b>{supplier}</b><br/>{sup_location}"
-    meta_box_html = f"NO.: {cv_no}<br/>DATE: {cv_date}<br/>CHEQUE NO.: -"
+    meta_box_html = f"NO.: {cv_no}<br/>DATE: {cv_date}<br/>APV NO.: {apv_no or '-'}<br/>PAYMENT METHOD: {pay_method}"
 
     header_table_data = [[Paragraph(supplier_box_html, body_norm), Paragraph(meta_box_html, body_norm)]]
     t_header = Table(header_table_data, colWidths=[340, 200])
@@ -1530,9 +1531,10 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
                   Paragraph("<b>DESCRIPTION</b>", body_norm),
                   Paragraph("<b>AMOUNT</b>", body_norm)]]
 
+    desc_text = f"Payment for materials/services (APV#{apv_no})" if apv_no else "Advance Downpayment"
     part_data.append([Paragraph("20100", body_norm),
                       Paragraph(supplier, body_norm),
-                      Paragraph("Payment for materials/services", body_norm),
+                      Paragraph(desc_text, body_norm),
                       Paragraph(f"₱{total_amt:,.2f}", body_norm)])
 
     t_part = Table(part_data, colWidths=[70, 150, 230, 90])
@@ -1544,29 +1546,28 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(t_part)
     story.append(Spacer(1, 10))
 
-    # --- 4. AMOUNT IN WORDS & DYNAMIC NET TOTAL SUMMARY ---
+    # --- Amount in Words & Totals with 1% WHT ---
     try:
         amt_words = amount_to_words(total_amt)
     except Exception:
         amt_words = f"PHILIPPINE PESO {total_amt:,.2f}"
-    
-    # Compute 1% WHT deduction
-    wht_amt = gross_total_debit * 0.01
-    net_total = gross_total_debit - wht_amt
-    
+
+    wht_amt = total_amt * 0.01
+    net_total = total_amt - wht_amt
+
     r_align_style = ParagraphStyle('RAlign', parent=body_norm, alignment=2)
-    
+
     words_data = [
         [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm),
-         Paragraph(f"SUB TOTAL: ₱{gross_total_debit:,.2f}<br/>"
+         Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f}<br/>"
                    f"2307 TAX (1%): ₱{wht_amt:,.2f}<br/>"
                    f"NET TOTAL PHP: ₱{net_total:,.2f}", r_align_style)]
     ]
     t_words = Table(words_data, colWidths=[360, 180])
     t_words.setStyle(TableStyle([
         ('FONTNAME', (0,0), (-1,-1), pdf_font),
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOX',(0,0),(-1,-1),1,colors.black),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
     ]))
     story.append(t_words)
     story.append(Spacer(1, 40))
