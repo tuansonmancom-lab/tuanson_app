@@ -787,10 +787,21 @@ def get_db_connection():
             st.stop()
     else:
         return sqlite3.connect(db_url, check_same_thread=False)
-#=================================Database=============================================
+        
+#======================================================================================
+#                                    DATABASE                                         =
+#======================================================================================
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
+
+    # --- Safe Migration for Advance PDC Column in Suppliers Table ---
+    try:
+        c.execute("ALTER TABLE suppliers ADD COLUMN requires_advance_pdc TEXT DEFAULT 'No'")
+        conn.commit()
+    except Exception:
+        # Column already exists
+        pass
     
     try:
         c.execute("PRAGMA journal_mode = WAL;")
@@ -3350,13 +3361,16 @@ elif role == "Accounting":
                 st.info("No pending APVs available for payment.")
     
         elif pay_basis == "Advance PDC / Downpayment (PO Basis)":
+            # --- FILTERED: Only fetch POs for suppliers flagged with requires_advance_pdc = 'Yes' ---
             unpaid_pos = c.execute("""
-                SELECT pono, supplier, SUM(amount) AS total_amount, project_name 
-                FROM requests 
-                WHERE pono IS NOT NULL AND pono != '' 
-                  AND LOWER(COALESCE(status, '')) LIKE '%approved%'
-                  AND (payment_status IS NULL OR payment_status = '' OR LOWER(payment_status) = 'unpaid')
-                GROUP BY pono, supplier, project_name
+                SELECT r.pono, r.supplier, SUM(r.amount) AS total_amount, r.project_name 
+                FROM requests r
+                JOIN suppliers s ON LOWER(TRIM(r.supplier)) = LOWER(TRIM(s.supplier_name))
+                WHERE r.pono IS NOT NULL AND r.pono != '' 
+                  AND LOWER(COALESCE(r.status, '')) LIKE '%approved%'
+                  AND (r.payment_status IS NULL OR r.payment_status = '' OR LOWER(r.payment_status) = 'unpaid')
+                  AND s.requires_advance_pdc = 'Yes'
+                GROUP BY r.pono, r.supplier, r.project_name
             """).fetchall()
             
             if unpaid_pos:
@@ -3370,7 +3384,7 @@ elif role == "Accounting":
                 debit_acct_name = f"Advances to Suppliers - {supplier_name}"
                 is_selectable = True
             else:
-                st.info("No open Approved POs available for advance check issuance.")
+                st.info("No open Approved POs available for suppliers flagged for Advance PDC.")
     
         else:
             # --- PETTY CASH / DIRECT LIQUIDATION ---
@@ -3963,7 +3977,7 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
-    #==============================================================================================            
+    #==============================================================================================        
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
         st.write("### 📖 Real-Time General Ledger Journal Entries")
@@ -4363,22 +4377,51 @@ elif role == "Admin View All":
 
         with st.expander("🏬 Manage Suppliers Master List"):
             st.write("#### 📝 Edit & Manage Suppliers")
-            sups_df = pd.read_sql_query("SELECT id, supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days FROM suppliers", conn)
+            
+            # 1. Safe DB migration to ensure the column exists
+            try:
+                c.execute("ALTER TABLE suppliers ADD COLUMN requires_advance_pdc TEXT DEFAULT 'No'")
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
+        
+            # 2. Query suppliers including the new requires_advance_pdc field
+            sups_df = pd.read_sql_query(
+                "SELECT id, supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days, requires_advance_pdc FROM suppliers", 
+                conn
+            )
+            
+            # Fill any null values with 'No'
+            if 'requires_advance_pdc' in sups_df.columns:
+                sups_df['requires_advance_pdc'] = sups_df['requires_advance_pdc'].fillna('No')
+        
+            # 3. Data Editor with Selectbox configuration
             edited_sups = st.data_editor(
                 sups_df,
                 num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
-                column_config={"id": None}
+                column_config={
+                    "id": None,
+                    "requires_advance_pdc": st.column_config.SelectboxColumn(
+                        "Requires Advance PDC?",
+                        help="If 'Yes', POs from this supplier can be paid via Advance PDC in Accounting before delivery.",
+                        options=["No", "Yes"],
+                        required=True,
+                        default="No"
+                    )
+                }
             )
+        
+            # 4. Save updated suppliers list
             if st.button("💾 Save Suppliers List", type="primary"):
                 c.execute("DELETE FROM suppliers")
                 for _, r in edited_sups.iterrows():
                     s_name = str(r['supplier_name']).strip() if pd.notnull(r['supplier_name']) else ""
                     if s_name:
                         c.execute("""
-                            INSERT INTO suppliers (supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO suppliers (supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days, requires_advance_pdc)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             s_name,
                             str(r.get('location', '') or ''),
@@ -4386,7 +4429,8 @@ elif role == "Admin View All":
                             str(r.get('contact_number', '') or ''),
                             str(r.get('tin_number', '') or ''),
                             str(r.get('vat_type', '') or 'VAT Registered'),
-                            int(r.get('terms_days', 0) or 0)
+                            int(r.get('terms_days', 0) or 0),
+                            str(r.get('requires_advance_pdc', 'No') or 'No')
                         ))
                 conn.commit()
                 st.success("Suppliers list updated!")
