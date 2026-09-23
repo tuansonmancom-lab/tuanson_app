@@ -2248,9 +2248,9 @@ if role == "Requisitor":
         
                                     Please log in to the Construction Management System to process the Purchase Order.
         
-                            """
-                        )
-                    except Exception as e:
+                                """
+                            )
+                except Exception as e:
                     st.warning(f"Submitted successfully, but could not send email alert: {e}")
         
             
