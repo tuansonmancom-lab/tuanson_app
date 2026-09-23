@@ -2229,7 +2229,9 @@ if role == "Requisitor":
                         WHERE status = 'Active' 
                         AND email IS NOT NULL 
                         AND email != '' 
-                        AND (role1 = 'Purchaser' OR role2 = 'Purchaser' OR role3 = 'Purchaser' OR role4 = 'Purchaser' OR role5 = 'Purchaser' OR role6 = 'Purchaser')""").fetchall()
+                        AND (role1 = 'Purchaser' OR role2 = 'Purchaser' OR role3 = 'Purchaser' 
+                             OR role4 = 'Purchaser' OR role5 = 'Purchaser' OR role6 = 'Purchaser')
+                    """).fetchall()
         
                     requester_name = st.session_state.get('username', 'A Requisitor')
         
@@ -2239,10 +2241,19 @@ if role == "Requisitor":
                         send_notification(
                             to_email=purchaser_email,
                             subject="📦 New Purchase Request Submitted",
-                            body=f"""New Purchase Request Submitted Submitted By: {requester_name} New items have been added to the purchasing queue. Please log in to the Construction Management System to process the Purchase Order."""
+                            body=f"""New Purchase Request Submitted
+                                    Submitted By: {requester_name}
+        
+                                    New items have been added to the purchasing queue.
+        
+                                    Please log in to the Construction Management System to process the Purchase Order.
+        
+                            """
                         )
-                except Exception as e:
-                st.warning(f"Submitted successfully, but could not send email alert: {e}")
+                    except Exception as e:
+                    st.warning(f"Submitted successfully, but could not send email alert: {e}")
+        
+            
         
                 st.success("All items successfully submitted to Purchasing!")
                 
