@@ -4260,20 +4260,7 @@ elif role == "Accounting":
             render_bank_reconciliation_tab(conn)
 
 
-        # Place this at the bottom of your Accounting Tab view
-        st.subheader("📧 Email System Verification")
-        
-        if st.button("📧 Send Test Email"):
-            success = send_notification(
-                to_email="tuanson.mancom@gmail.com",
-                subject="Test Notification - Streamlit App",
-                body="""Success! Your Streamlit workflow email notification system is working properly.""")
-            
-            if success:
-                st.success("Test email sent! Check your inbox.")
-            else:
-                st.error("Failed to send email. Please check your configuration.")
-            
+                  
 #==================================================================================
 # --- ROLE 6: ADMIN VIEW ALL ---
 elif role == "Admin View All":
