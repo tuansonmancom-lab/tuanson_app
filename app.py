@@ -13,16 +13,21 @@ from email.mime.text import MIMEText
 
 # --- EMAIL NOTIFICATION HELPER ---
 def send_notification(to_email, subject, body):
+    if "email" not in st.secrets:
+        st.error("Email configuration missing! Please add [email] section to Streamlit secrets.")
+        return False
+
+    email_cfg = st.secrets["email"]
     msg = MIMEText(body, "html")
     msg["Subject"] = subject
-    msg["From"] = st.secrets["email"]["sender_email"]
+    msg["From"] = email_cfg["sender_email"]
     msg["To"] = to_email
 
     try:
-        with smtplib.SMTP(st.secrets["email"]["smtp_server"], st.secrets["email"]["port"]) as server:
+        with smtplib.SMTP(email_cfg["smtp_server"], int(email_cfg["port"])) as server:
             server.starttls()
-            server.login(st.secrets["email"]["sender_email"], st.secrets["email"]["sender_password"])
-            server.sendmail(st.secrets["email"]["sender_email"], to_email, msg.as_string())
+            server.login(email_cfg["sender_email"], email_cfg["sender_password"])
+            server.sendmail(email_cfg["sender_email"], to_email, msg.as_string())
         return True
     except Exception as e:
         st.error(f"Failed to send email: {e}")
