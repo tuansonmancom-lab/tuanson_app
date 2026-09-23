@@ -4216,10 +4216,7 @@ elif role == "Accounting":
             success = send_notification(
                 to_email="tuanson.mancom@gmail.com",
                 subject="Test Notification - Streamlit App",
-                body="""Success!
-        Your Streamlit workflow email notification system is working properly.
-        """
-            )
+                body="""Success! Your Streamlit workflow email notification system is working properly.""")
             
             if success:
                 st.success("Test email sent! Check your inbox.")
