@@ -7,6 +7,17 @@ from datetime import datetime
 from io import BytesIO
 from datetime import datetime, timedelta
 
+#=============================Fetch Email add
+def get_user_email_by_role(role_name, conn):
+    """Fetch the email address of the user assigned to a specific role."""
+    try:
+        c = conn.cursor()
+        row = c.execute("SELECT email FROM users WHERE role = ? AND email IS NOT NULL LIMIT 1", (role_name,)).fetchone()
+        if row and row[0]:
+            return row[0]
+    except Exception as e:
+        st.error(f"Error fetching email for role {role_name}: {e}")
+    return None
 #=======================send email===============================
 import smtplib
 from email.mime.text import MIMEText
