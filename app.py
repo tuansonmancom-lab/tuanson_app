@@ -2490,19 +2490,27 @@ elif role == "Purchaser":
 
     #==============================Notinfication =============================
     # 1. Fetch pending counts from database
-    pending_deliveries = c.execute("SELECT COUNT(*) FROM purchase_orders WHERE status = 'Pending Delivery'").fetchone()[0]
-    pending_pr_count = c.execute("SELECT COUNT(*) FROM requisitions WHERE status = 'Pending PO'").fetchone()[0]
-    
-    # 2. Format tab titles dynamically with badge counts
-    po_label = f"📝 Create Purchase Orders 🔴 {pending_pr_count}" if pending_pr_count > 0 else "📝 Create Purchase Orders"
-    receive_label = f"📦 Receive Deliveries 🔴 {pending_deliveries}" if pending_deliveries > 0 else "📦 Receive Deliveries"
-    
-    # 3. Pass dynamic labels into st.tabs
-    tab_create_po, tab_receive, tab_ledger = st.tabs([
-        po_label, 
-        receive_label, 
-        "📊 Inventory Ledger & Issuance"
-    ])
+    # Safe fetch for Pending Deliveries badge count
+        try:
+            pending_deliveries = c.execute("SELECT COUNT(*) FROM purchase_orders WHERE status = 'Pending Delivery'").fetchone()[0]
+        except Exception:
+            pending_deliveries = 0
+        
+        # Safe fetch for Pending Requisitions badge count
+        try:
+            pending_pr_count = c.execute("SELECT COUNT(*) FROM requisitions WHERE status = 'Pending PO'").fetchone()[0]
+        except Exception:
+            pending_pr_count = 0
+        
+        # Format tab labels dynamically
+        po_label = f"📝 Create Purchase Orders 🔴 {pending_pr_count}" if pending_pr_count > 0 else "📝 Create Purchase Orders"
+        receive_label = f"📦 Receive Deliveries 🔴 {pending_deliveries}" if pending_deliveries > 0 else "📦 Receive Deliveries"
+        
+        tab_po, tab_receive, tab_ledger = st.tabs([
+            po_label, 
+            receive_label, 
+            "📊 Inventory Ledger & Issuance"
+        ])
     #=========================================================================
     with tab_receive:
         st.write("### 🚚 Record Supplier Deliveries")
