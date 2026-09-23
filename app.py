@@ -2033,6 +2033,14 @@ if role == "Requisitor":
     
     tab_request, tab_track, tab_receive = st.tabs(["📝 New Material Request", "🔍 Track My Requests", "📦 Receive Incoming Items"])
     
+    # Quick test button===============================
+            if st.button("📧 Send Test Email"):
+                success = send_notification(
+                    to_email="tuanson.mancom@gmail.com",
+                    subject="Test Notification - Streamlit App",
+                    body="Success! Your Streamlit workflow email notification system is working properly.")
+                if success: st.success("Test email sent successfully! Check your inbox.")
+    #==================================================                
     with tab_request:
         if "request_cart" not in st.session_state:
             st.session_state.request_cart = []
@@ -2181,13 +2189,7 @@ if role == "Requisitor":
                 st.success("All items successfully submitted to Purchasing!")
                 st.rerun()
 
-            # Quick test button
-            if st.button("📧 Send Test Email"):
-                success = send_notification(
-                    to_email="tuanson.mancom@gmail.com",
-                    subject="Test Notification - Streamlit App",
-                    body="Success! Your Streamlit workflow email notification system is working properly.")
-                if success: st.success("Test email sent successfully! Check your inbox.")
+           
 
     with tab_track:
         st.write(f"### 🔍 Request History for {st.session_state.current_user}")
