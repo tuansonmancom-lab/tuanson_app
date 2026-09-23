@@ -7,6 +7,28 @@ from datetime import datetime
 from io import BytesIO
 from datetime import datetime, timedelta
 
+#=======================send email===============================
+import smtplib
+from email.mime.text import MIMEText
+
+# --- EMAIL NOTIFICATION HELPER ---
+def send_notification(to_email, subject, body):
+    msg = MIMEText(body, "html")
+    msg["Subject"] = subject
+    msg["From"] = st.secrets["email"]["sender_email"]
+    msg["To"] = to_email
+
+    try:
+        with smtplib.SMTP(st.secrets["email"]["smtp_server"], st.secrets["email"]["port"]) as server:
+            server.starttls()
+            server.login(st.secrets["email"]["sender_email"], st.secrets["email"]["sender_password"])
+            server.sendmail(st.secrets["email"]["sender_email"], to_email, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Failed to send email: {e}")
+        return False
+#=======================end send email===============================
+
 # ==============================================================================
 # BIR FORM 2307 (JANUARY 2018 ENCS) OFFICIAL TEMPLATE GENERATOR
 # ==============================================================================
