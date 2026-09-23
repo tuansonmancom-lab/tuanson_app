@@ -2071,14 +2071,7 @@ if role == "Requisitor":
     
     tab_request, tab_track, tab_receive = st.tabs(["📝 New Material Request", "🔍 Track My Requests", "📦 Receive Incoming Items"])
     
-    # Quick test button===============================
-    if st.button("📧 Send Test Email"):
-        success = send_notification(
-            to_email="tuanson.mancom@gmail.com",
-            subject="Test Notification - Streamlit App",
-            body="Success! Your Streamlit workflow email notification system is working properly.")
-        if success: st.success("Test email sent successfully! Check your inbox.")
-    #==================================================                
+      
     with tab_request:
         if "request_cart" not in st.session_state:
             st.session_state.request_cart = []
@@ -2224,7 +2217,39 @@ if role == "Requisitor":
                 
                 conn.commit()
                 st.session_state.request_cart = [] 
+                
+                #==========================================Email notification===========================
+                
+
+                    # --- EMAIL NOTIFICATION TO PURCHASER(S) ---
+                    try:
+                        # 1. Fetch active email addresses for any user assigned as 'Purchaser'
+                        purchasers = c.execute("""
+                            SELECT DISTINCT email FROM users 
+                            WHERE status = 'Active' 
+                            AND email IS NOT NULL 
+                            AND email != '' 
+                            AND (role1 = 'Purchaser' OR role2 = 'Purchaser' OR role3 = 'Purchaser' 
+                                 OR role4 = 'Purchaser' OR role5 = 'Purchaser' OR role6 = 'Purchaser')""")
+                        .fetchall()
+            
+                        requester_name = st.session_state.get('username', 'A Requisitor')
+            
+                        # 2. Loop through and send email to each Purchaser
+                        for row in purchasers:
+                            purchaser_email = row[0]
+                            send_notification(
+                                to_email=purchaser_email,
+                                subject="📦 New Purchase Request Submitted",
+                                body=f"""New Purchase Request Submitted Submitted By: {requester_name} New items have been added to the purchasing queue. Please log in to the Construction Management System to process the Purchase Order."""
+                            )
+                    except Exception as e:
+                    st.warning(f"Submitted successfully, but could not send email alert: {e}")
+            
                 st.success("All items successfully submitted to Purchasing!")
+                
+
+                #===========================================end of email notication=====================
                 st.rerun()
 
            
