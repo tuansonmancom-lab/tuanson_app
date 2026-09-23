@@ -2221,31 +2221,31 @@ if role == "Requisitor":
                 #==========================================Email notification===========================
                 
 
-                    # --- EMAIL NOTIFICATION TO PURCHASER(S) ---
-                    try:
-                        # 1. Fetch active email addresses for any user assigned as 'Purchaser'
-                        purchasers = c.execute("""
-                            SELECT DISTINCT email FROM users 
-                            WHERE status = 'Active' 
-                            AND email IS NOT NULL 
-                            AND email != '' 
-                            AND (role1 = 'Purchaser' OR role2 = 'Purchaser' OR role3 = 'Purchaser' 
-                                 OR role4 = 'Purchaser' OR role5 = 'Purchaser' OR role6 = 'Purchaser')""")
-                        .fetchall()
-            
-                        requester_name = st.session_state.get('username', 'A Requisitor')
-            
-                        # 2. Loop through and send email to each Purchaser
-                        for row in purchasers:
-                            purchaser_email = row[0]
-                            send_notification(
-                                to_email=purchaser_email,
-                                subject="📦 New Purchase Request Submitted",
-                                body=f"""New Purchase Request Submitted Submitted By: {requester_name} New items have been added to the purchasing queue. Please log in to the Construction Management System to process the Purchase Order."""
-                            )
-                    except Exception as e:
-                    st.warning(f"Submitted successfully, but could not send email alert: {e}")
-            
+                # --- EMAIL NOTIFICATION TO PURCHASER(S) ---
+                try:
+                    # 1. Fetch active email addresses for any user assigned as 'Purchaser'
+                    purchasers = c.execute("""
+                        SELECT DISTINCT email FROM users 
+                        WHERE status = 'Active' 
+                        AND email IS NOT NULL 
+                        AND email != '' 
+                        AND (role1 = 'Purchaser' OR role2 = 'Purchaser' OR role3 = 'Purchaser' 
+                             OR role4 = 'Purchaser' OR role5 = 'Purchaser' OR role6 = 'Purchaser')""")
+                    .fetchall()
+        
+                    requester_name = st.session_state.get('username', 'A Requisitor')
+        
+                    # 2. Loop through and send email to each Purchaser
+                    for row in purchasers:
+                        purchaser_email = row[0]
+                        send_notification(
+                            to_email=purchaser_email,
+                            subject="📦 New Purchase Request Submitted",
+                            body=f"""New Purchase Request Submitted Submitted By: {requester_name} New items have been added to the purchasing queue. Please log in to the Construction Management System to process the Purchase Order."""
+                        )
+                except Exception as e:
+                st.warning(f"Submitted successfully, but could not send email alert: {e}")
+        
                 st.success("All items successfully submitted to Purchasing!")
                 
 
@@ -2342,18 +2342,6 @@ if role == "Requisitor":
                     
                     conn.commit()
                     st.success("✅ Material receipt confirmed successfully!")
-
-                    #=============================================email notification========== 
-                    # 2. Fetch Purchaser Email (Vergel)
-                    purchaser_email = get_user_email_by_role("Purchaser", conn)
-                
-                    # 3. Send Notification
-                    if purchaser_email:
-                        subject = f"New Purchase Request: PR#{pr_number}"
-                        body = f"""New Purchase Request Submitted<br>PR No: {pr_number}<br>Project: {project_name}<br>Submitted By: {st.session_state.get('username', 'Requisitor')}<br>Please log in to review and create the Purchase Order."""
-                        send_notification(to_email=purchaser_email, subject=subject, body=body)
-                    #=============================================email end====================
-                    
                     st.rerun()
             else:
                 st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
