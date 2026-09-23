@@ -1458,7 +1458,7 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     return buffer.getvalue()
 
 # --- CV PDF GENERATOR FUNCTION ---
-# --- CV PDF GENERATOR FUNCTION (Corrected with APV + 1% WHT) ---
+# --- CV PDF GENERATOR FUNCTION ---
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
     import os
     from reportlab.lib.pagesizes import letter
@@ -1469,9 +1469,10 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     from reportlab.pdfbase.ttfonts import TTFont
     from io import BytesIO
 
-    # Register font for ₱ rendering
+    # 1. REGISTER ROBOTO FONT FOR NATIVE ₱ RENDERING
     pdf_font = "Helvetica"
-    for font_path in ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]:
+    font_candidates = ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]
+    for font_path in font_candidates:
         if os.path.exists(font_path):
             try:
                 pdfmetrics.registerFont(TTFont("Roboto", font_path))
@@ -1481,26 +1482,15 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
                 pass
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter,
-                            rightMargin=36, leftMargin=36,
-                            topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=letter,
+        rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36
+    )
     story = []
     styles = getSampleStyleSheet()
 
-    # Styles
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName=pdf_font, fontSize=16, leading=20, alignment=1)
-    sub_title_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName=pdf_font, fontSize=9, leading=12, alignment=1)
-    body_norm = ParagraphStyle('BodyNorm', parent=styles['Normal'], fontName=pdf_font, fontSize=8, leading=10)
-
-    # Header
-    story.append(Paragraph("<b>Tuanson Construction</b>", title_style))
-    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_title_style))
-    story.append(Paragraph("Tel: - Fax: -", sub_title_style))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("<b>Payment Voucher</b>", title_style))
-    story.append(Spacer(1, 10))
-
-    # Supplier + Meta Box
+    # Fetch Supplier Location
     sup_location = "Cebu, Philippines"
     if conn:
         try:
@@ -1511,80 +1501,256 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         except Exception:
             pass
 
-    supplier_box_html = f"<b>{supplier}</b><br/>{sup_location}"
-    meta_box_html = f"NO.: {cv_no}<br/>DATE: {cv_date}<br/>APV NO.: {apv_no or '-'}<br/>PAYMENT METHOD: {pay_method}"
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName=pdf_font, fontSize=16, leading=20, alignment=1)
+    sub_title_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName=pdf_font, fontSize=9, leading=12, alignment=1)
+    body_norm = ParagraphStyle('BodyNorm', parent=styles['Normal'], fontName=pdf_font, fontSize=8, leading=10)
 
-    header_table_data = [[Paragraph(supplier_box_html, body_norm), Paragraph(meta_box_html, body_norm)]]
-    t_header = Table(header_table_data, colWidths=[340, 200])
-    t_header.setStyle(TableStyle([
-        ('FONTNAME', (0,0), (-1,-1), pdf_font),
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('INNERGRID', (0,0), (-1,-1), 1, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'TOP'),
-    ]))
-    story.append(t_header)
+    story.append(Paragraph("**Tuanson Construction**", title_style))
+    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_title_style))
+    story.append(Paragraph("Tel: - Fax: -", sub_title_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("**Payment Voucher**", title_style))
     story.append(Spacer(1, 10))
 
-    # Particulars Table
-    part_data = [[Paragraph("<b>A/C CODE</b>", body_norm),
-                  Paragraph("<b>A/C NAME</b>", body_norm),
-                  Paragraph("<b>DESCRIPTION</b>", body_norm),
-                  Paragraph("<b>AMOUNT</b>", body_norm)]]
+    cheque_no_str = "-"
+    cheque_date_str = "-"
+    po_no_str = "-"
+    project_str = "-"
 
-    desc_text = f"Payment for materials/services (APV#{apv_no})" if apv_no else "Advance Downpayment"
-    part_data.append([Paragraph("20100", body_norm),
-                      Paragraph(supplier, body_norm),
-                      Paragraph(desc_text, body_norm),
-                      Paragraph(f"₱{total_amt:,.2f}", body_norm)])
+    if conn:
+        try:
+            c = conn.cursor()
+            # If standard APV payment
+            if apv_no and apv_no.strip():
+                del_row = c.execute("""
+                    SELECT cheque_no, cheque_date, pono, project_name 
+                    FROM deliveries WHERE apv_number = ? AND supplier = ?
+                """, (apv_no, supplier)).fetchone()
+                if del_row:
+                    cheque_no_str = del_row[0] or "-"
+                    cheque_date_str = del_row[1] or "-"
+                    po_no_str = del_row[2] or "-"
+                    project_str = del_row[3] or "-"
+            # If Advance PDC (PO Basis)
+            else:
+                req_row = c.execute("""
+                    SELECT cheque_no, cheque_date, pono, project_name 
+                    FROM requests WHERE cv_number = ? AND supplier = ?
+                """, (cv_no, supplier)).fetchone()
+                if req_row:
+                    cheque_no_str = req_row[0] or "-"
+                    cheque_date_str = req_row[1] or "-"
+                    po_no_str = req_row[2] or "-"
+                    project_str = req_row[3] or "-"
+        except Exception:
+            pass
 
-    t_part = Table(part_data, colWidths=[70, 150, 230, 90])
-    t_part.setStyle(TableStyle([
-        ('BOX',(0,0),(-1,-1),1,colors.black),
-        ('INNERGRID',(0,0),(-1,-1),0.5,colors.black),
-        ('ALIGN',(3,0),(3,-1),'RIGHT'),
-    ]))
-    story.append(t_part)
-    story.append(Spacer(1, 10))
+    supplier_box_html = f"**{supplier}**
 
-    # --- Amount in Words & Totals with 1% WHT ---
+{sup_location}"
+meta_box_html = f"NO.: {cv_no}
+
+
+DATE: {cv_date}
+
+
+CHEQUE NO.: {cheque_no_str} / {cheque_date_str}"
+
+header_table_data = [[Paragraph(supplier_box_html, body_norm), Paragraph(meta_box_html, body_norm)]]
+t_header = Table(header_table_data, colWidths=[340, 200])
+t_header.setStyle(TableStyle([
+    ('FONTNAME', (0,0), (-1,-1), pdf_font),
+    ('BOX', (0,0), (-1,-1), 1, colors.black),
+    ('INNERGRID', (0,0), (-1,-1), 1, colors.black),
+    ('VALIGN', (0,0), (-1,-1), 'TOP'),
+    ('TOPPADDING', (0,0), (-1,-1), 6),
+    ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ('LEFTPADDING', (0,0), (-1,-1), 6),
+    ('RIGHTPADDING', (0,0), (-1,-1), 6),
+]))
+story.append(t_header)
+story.append(Spacer(1, 10))
+
+apv_ref = f"APV#{apv_no}" if apv_no else "Advance Downpayment"
+po_ref = f"(PO#{po_no_str})" if po_no_str != "-" else ""
+desc_text = f"Payment for materials / services ({apv_ref}) {po_ref} for {project_str}".strip()
+
+# --- DYNAMIC DB QUERY FOR JOURNAL ENTRIES ---
+db_entries = []
+if conn:
     try:
-        amt_words = amount_to_words(total_amt)
+        c = conn.cursor()
+        db_entries = c.execute("""
+            SELECT account_code, account_name, description, debit, credit 
+            FROM journal_entries 
+            WHERE voucher_no = ? 
+            ORDER BY debit DESC, credit ASC
+        """, (cv_no,)).fetchall()
     except Exception:
-        amt_words = f"PHILIPPINE PESO {total_amt:,.2f}"
+        db_entries = []
 
-    wht_amt = total_amt * 0.01
-    net_total = total_amt - wht_amt
-
-    r_align_style = ParagraphStyle('RAlign', parent=body_norm, alignment=2)
-
-    words_data = [
-        [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm),
-         Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f}<br/>"
-                   f"2307 TAX (1%): ₱{wht_amt:,.2f}<br/>"
-                   f"NET TOTAL PHP: ₱{net_total:,.2f}", r_align_style)]
+# Fallback if no database entries exist yet
+if not db_entries:
+    acct_code = "20100" if apv_no else "10500"
+    acct_name = supplier if apv_no else f"Advances to Suppliers - {supplier}"
+    db_entries = [
+        (acct_code, acct_name, desc_text, float(total_amt), 0.0),
+        ("10330", "Cash in Bank BDO", desc_text, 0.0, float(total_amt))
     ]
-    t_words = Table(words_data, colWidths=[360, 180])
-    t_words.setStyle(TableStyle([
-        ('FONTNAME', (0,0), (-1,-1), pdf_font),
-        ('BOX',(0,0),(-1,-1),1,colors.black),
-        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-    ]))
-    story.append(t_words)
-    story.append(Spacer(1, 40))
 
-    # Signatures
-    sig_data = [
-        [Paragraph("_____________________________<br/>APPROVED BY", body_norm),
-         Paragraph("_____________________________<br/>RECEIVED BY", body_norm)]
-    ]
-    t_sig = Table(sig_data, colWidths=[270,270])
-    t_sig.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER')]))
-    story.append(t_sig)
+# --- 1. PARTICULAR / ACCOUNT BREAKDOWN TABLE ---
+part_data = [
+    [Paragraph("**A/C CODE**", body_norm), Paragraph("**A/C NAME**", body_norm), Paragraph("**DESCRIPTION**", body_norm), Paragraph("**AMOUNT**", body_norm)]
+]
+gross_total_debit = 0.0
 
-    # Build PDF
-    doc.build(story)
-    buffer.seek(0)
-    return buffer.getvalue() 
+for code, name, desc, dr, cr in db_entries:
+    if dr > 0:
+        gross_total_debit += dr
+        part_desc = desc if desc else desc_text
+        part_data.append([
+            Paragraph(str(code), body_norm),
+            Paragraph(str(name), body_norm),
+            Paragraph(str(part_desc), body_norm),
+            Paragraph(f"₱{dr:,.2f}", body_norm)
+        ])
+
+t_part = Table(part_data, colWidths=[70, 150, 230, 90])
+t_part.setStyle(TableStyle([
+    ('FONTNAME', (0,0), (-1,-1), pdf_font),
+    ('BOX', (0,0), (-1,-1), 1, colors.black),
+    ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ('ALIGN', (3,0), (3,-1), 'RIGHT'),
+    ('TOPPADDING', (0,0), (-1,-1), 5),
+    ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+]))
+story.append(t_part)
+story.append(Spacer(1, 10))
+
+# --- 2. DYNAMIC JOURNALS TABLE ---
+story.append(Paragraph("**Journals:**", body_norm))
+story.append(Spacer(1, 3))
+
+j_data = [
+    [Paragraph("**Doc No.**", body_norm), Paragraph("**Date**", body_norm), Paragraph("**Account #**", body_norm), Paragraph("**Account Name**", body_norm), Paragraph("**Debit**", body_norm), Paragraph("**Credit**", body_norm)]
+]
+
+tot_dr, tot_cr = 0.0, 0.0
+net_check_amount = 0.0
+
+for code, name, desc, dr, cr in db_entries:
+    tot_dr += dr
+    tot_cr += cr
+    # Net check disbursement is represented by the credit line excluding WHT (20400) or Discounts (50200)
+    if cr > 0 and str(code) not in ['20400', '50200']:
+        net_check_amount = cr
+
+    j_data.append([
+        Paragraph(str(cv_no), body_norm),
+        Paragraph(str(cv_date)[:10], body_norm),
+        Paragraph(str(code), body_norm),
+        Paragraph(str(name), body_norm),
+        Paragraph(f"{dr:,.2f}" if dr > 0 else "", body_norm),
+        Paragraph(f"{cr:,.2f}" if cr > 0 else "", body_norm)
+    ])
+
+if net_check_amount == 0.0:
+    net_check_amount = tot_cr if tot_cr > 0 else float(total_amt)
+
+# Totals Row
+j_data.append([
+    Paragraph("", body_norm),
+    Paragraph("", body_norm),
+    Paragraph("", body_norm),
+    Paragraph("**TOTAL**", body_norm),
+    Paragraph(f"**{tot_dr:,.2f}**", body_norm),
+    Paragraph(f"**{tot_cr:,.2f}**", body_norm)
+])
+
+t_j = Table(j_data, colWidths=[65, 65, 65, 185, 80, 80])
+t_j.setStyle(TableStyle([
+    ('FONTNAME', (0,0), (-1,-1), pdf_font),
+    ('BOX', (0,0), (-1,-1), 1, colors.black),
+    ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ('ALIGN', (4,0), (5,-1), 'RIGHT'),
+    ('TOPPADDING', (0,0), (-1,-1), 4),
+    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+]))
+story.append(t_j)
+story.append(Spacer(1, 10))
+
+# --- 3. SOURCE DOCUMENTS TABLE ---
+doc_data = [
+    [Paragraph("**Type**", body_norm), Paragraph("**Doc. No.**", body_norm), Paragraph("**Doc. Date**", body_norm), Paragraph("**Description**", body_norm), Paragraph("**Orig. Amount**", body_norm), Paragraph("**Paid Amount**", body_norm)],
+    [Paragraph("BIL", body_norm), Paragraph(f"PO#{po_no_str}", body_norm), Paragraph(str(cv_date)[:10], body_norm), Paragraph(f"PAYABLE FOR MATERIALS FOR \"{project_str.upper()}\"", body_norm), Paragraph(f"{gross_total_debit:,.2f}", body_norm), Paragraph(f"{net_check_amount:,.2f}", body_norm)]
+]
+t_doc = Table(doc_data, colWidths=[40, 75, 65, 200, 80, 80])
+t_doc.setStyle(TableStyle([
+    ('FONTNAME', (0,0), (-1,-1), pdf_font),
+    ('BOX', (0,0), (-1,-1), 1, colors.black),
+    ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ('ALIGN', (4,0), (5,-1), 'RIGHT'),
+    ('TOPPADDING', (0,0), (-1,-1), 4),
+    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+]))
+story.append(t_doc)
+story.append(Spacer(1, 10))
+
+# --- 4. AMOUNT IN WORDS & DYNAMIC NET TOTAL SUMMARY ---
+try:
+    amt_words = amount_to_words(net_check_amount)
+except Exception:
+    amt_words = f"PHILIPPINE PESO {net_check_amount:,.2f}"
+
+wht_disc_deduction = max(0.0, gross_total_debit - net_check_amount)
+r_align_style = ParagraphStyle('RAlign', parent=body_norm, alignment=2)
+
+words_data = [
+    [Paragraph(f"**AMOUNT IN WORDS:**
+
+{amt_words.upper()}", body_norm),
+Paragraph(f"SUB TOTAL: ₱{gross_total_debit:,.2f}
+
+
+2307 TAX / DISC: ₱{wht_disc_deduction:,.2f}
+
+
+NET TOTAL PHP: ₱{net_check_amount:,.2f}", r_align_style)]
+]
+t_words = Table(words_data, colWidths=[360, 180])
+t_words.setStyle(TableStyle([
+('FONTNAME', (0,0), (-1,-1), pdf_font),
+('BOX', (0,0), (-1,-1), 1, colors.black),
+('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+('TOPPADDING', (0,0), (-1,-1), 5),
+('BOTTOMPADDING', (0,0), (-1,-1), 5),
+]))
+story.append(t_words)
+story.append(Spacer(1, 40))
+
+# --- SIGNATURES ---
+sig_data = [
+    [Paragraph("____________________________________
+
+APPROVED BY", ParagraphStyle('C1', parent=body_norm, alignment=1)),
+Paragraph("____________________________________
+
+
+RECEIVED BY", ParagraphStyle('C2', parent=body_norm, alignment=1))]
+]
+t_sig = Table(sig_data, colWidths=[270, 270])
+t_sig.setStyle(TableStyle([
+('FONTNAME', (0,0), (-1,-1), pdf_font),
+('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+]))
+story.append(t_sig)
+
+doc.build(story)
+buffer.seek(0)
+return buffer.getvalue()
 
 #===========================================================================
 from datetime import datetime
