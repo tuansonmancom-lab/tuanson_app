@@ -2272,6 +2272,16 @@ if role == "Requisitor":
                     st.rerun()
             else:
                 st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
+
+        # Quick test button
+        if st.button("📧 Send Test Email"):
+            success = send_notification(
+                to_email="tuanson.mancom@gmail.com",
+                subject="Test Notification - Streamlit App",
+                body="Success! Your Streamlit workflow email notification system is working properly."
+        )
+        if success:
+        st.success("Test email sent successfully! Check your inbox.")
                     
 #=================================================================================
 # --- ROLE 2: PURCHASER ---
