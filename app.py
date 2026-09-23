@@ -2317,6 +2317,18 @@ if role == "Requisitor":
                     
                     conn.commit()
                     st.success("✅ Material receipt confirmed successfully!")
+
+                    #=============================================email notification========== 
+                    # 2. Fetch Purchaser Email (Vergel)
+                    purchaser_email = get_user_email_by_role("Purchaser", conn)
+                
+                    # 3. Send Notification
+                    if purchaser_email:
+                        subject = f"New Purchase Request: PR#{pr_number}"
+                        body = f"""New Purchase Request Submitted<br>PR No: {pr_number}<br>Project: {project_name}<br>Submitted By: {st.session_state.get('username', 'Requisitor')}<br>Please log in to review and create the Purchase Order."""
+                        send_notification(to_email=purchaser_email, subject=subject, body=body)
+                    #=============================================email end====================
+                    
                     st.rerun()
             else:
                 st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
