@@ -4154,68 +4154,8 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
-                    
-    def render_online_users_dashboard():
-        
-    #===================================================================    
-    st.write("### 👥 Live Active Users & System Presence")
-
-    # Fetch all users with their roles and last_seen timestamp
-    users_df = pd.read_sql_query("""
-        SELECT username AS 'Username', 
-               full_name AS 'Full Name', 
-               role AS 'Role', 
-               last_seen AS 'Last Active'
-        FROM users
-        ORDER BY last_seen DESC
-    """, conn)
-
-    if not users_df.empty:
-        now = datetime.now()
-
-        def evaluate_presence(last_seen_str):
-            if pd.isna(last_seen_str) or not last_seen_str:
-                return "🔴 Offline"
-            try:
-                last_dt = datetime.strptime(str(last_seen_str), '%Y-%m-%d %H:%M:%S')
-                time_diff = (now - last_dt).total_seconds() / 60.0
-                
-                # Active within 5 minutes = Online
-                if time_diff <= 5:
-                    return f"🟢 Online ({int(time_diff)}m ago)"
-                elif time_diff <= 15:
-                    return f"🟡 Idle ({int(time_diff)}m ago)"
-                else:
-                    return "🔴 Offline"
-            except Exception:
-                return "🔴 Offline"
-
-        users_df['Status'] = users_df['Last Active'].apply(evaluate_presence)
-
-        # Summary Metrics
-        online_count = len(users_df[users_df['Status'].str.contains("🟢")])
-        idle_count = len(users_df[users_df['Status'].str.contains("🟡")])
-        offline_count = len(users_df[users_df['Status'].str.contains("🔴")])
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("🟢 Online Users", online_count)
-        col2.metric("🟡 Idle Users", idle_count)
-        col3.metric("🔴 Offline Users", offline_count)
-
-        st.markdown("---")
-
-        # Display filterable user table
-        role_filter = st.multiselect("Filter by Role:", options=users_df['Role'].unique().tolist(), default=users_df['Role'].unique().tolist())
-        filtered_df = users_df[users_df['Role'].isin(role_filter)]
-
-        st.dataframe(
-            filtered_df[['Status', 'Username', 'Full Name', 'Role', 'Last Active']],
-            use_container_width=True,
-            hide_index=True
-        )
-    else:
-        st.info("No registered users found.")
-        #==================================================
+                  
+   
     #==============================================================================================        
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
