@@ -1496,8 +1496,7 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     return buffer.getvalue()
 
 # --- CV PDF GENERATOR FUNCTION ---
-# --- CV PDF GENERATOR FUNCTION (Corrected) ---
-def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None, discount=0.0, ewt_amt=0.0, ewt_code="", **kwargs):
+def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
     import os
     from reportlab.lib.pagesizes import letter
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -1507,15 +1506,10 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     from reportlab.pdfbase.ttfonts import TTFont
     from io import BytesIO
 
-    # Calculate financial breakdowns
-    gross_amt = float(total_amt or 0.0)
-    disc_amt = float(discount or 0.0)
-    wht_amt = float(ewt_amt or 0.0)
-    net_amt = max(0.0, gross_amt - disc_amt - wht_amt)
-
-    # Register font for ₱ rendering
+    # 1. REGISTER ROBOTO FONT FOR NATIVE ₱ RENDERING
     pdf_font = "Helvetica"
-    for font_path in ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]:
+    font_candidates = ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]
+    for font_path in font_candidates:
         if os.path.exists(font_path):
             try:
                 pdfmetrics.registerFont(TTFont("Roboto", font_path))
@@ -1525,26 +1519,15 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
                 pass
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter,
-                            rightMargin=36, leftMargin=36,
-                            topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=letter,
+        rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36
+    )
     story = []
     styles = getSampleStyleSheet()
 
-    # Styles
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName=pdf_font, fontSize=16, leading=20, alignment=1)
-    sub_title_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName=pdf_font, fontSize=9, leading=12, alignment=1)
-    body_norm = ParagraphStyle('BodyNorm', parent=styles['Normal'], fontName=pdf_font, fontSize=8, leading=10)
-
-    # Header
-    story.append(Paragraph("<b>Tuanson Construction</b>", title_style))
-    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_title_style))
-    story.append(Paragraph("Tel: - Fax: -", sub_title_style))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("<b>Payment Voucher</b>", title_style))
-    story.append(Spacer(1, 10))
-
-    # Supplier + Meta Box
+    # Fetch Supplier Location
     sup_location = "Cebu, Philippines"
     if conn:
         try:
@@ -1555,8 +1538,52 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         except Exception:
             pass
 
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName=pdf_font, fontSize=16, leading=20, alignment=1)
+    sub_title_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName=pdf_font, fontSize=9, leading=12, alignment=1)
+    body_norm = ParagraphStyle('BodyNorm', parent=styles['Normal'], fontName=pdf_font, fontSize=8, leading=10)
+
+    story.append(Paragraph("<b>Tuanson Construction</b>", title_style))
+    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_title_style))
+    story.append(Paragraph("Tel: - Fax: -", sub_title_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("<b>Payment Voucher</b>", title_style))
+    story.append(Spacer(1, 10))
+
+    cheque_no_str = "-"
+    cheque_date_str = "-"
+    po_no_str = "-"
+    project_str = "-"
+
+    if conn:
+        try:
+            c = conn.cursor()
+            # If standard APV payment
+            if apv_no and apv_no.strip():
+                del_row = c.execute("""
+                    SELECT cheque_no, cheque_date, pono, project_name 
+                    FROM deliveries WHERE apv_number = ? AND supplier = ?
+                """, (apv_no, supplier)).fetchone()
+                if del_row:
+                    cheque_no_str = del_row[0] or "-"
+                    cheque_date_str = del_row[1] or "-"
+                    po_no_str = del_row[2] or "-"
+                    project_str = del_row[3] or "-"
+            # If Advance PDC (PO Basis)
+            else:
+                req_row = c.execute("""
+                    SELECT cheque_no, cheque_date, pono, project_name 
+                    FROM requests WHERE cv_number = ? AND supplier = ?
+                """, (cv_no, supplier)).fetchone()
+                if req_row:
+                    cheque_no_str = req_row[0] or "-"
+                    cheque_date_str = req_row[1] or "-"
+                    po_no_str = req_row[2] or "-"
+                    project_str = req_row[3] or "-"
+        except Exception:
+            pass
+
     supplier_box_html = f"<b>{supplier}</b><br/>{sup_location}"
-    meta_box_html = f"NO.: {cv_no}<br/>DATE: {cv_date}<br/>CHEQUE NO.: -"
+    meta_box_html = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {cv_date}<br/><b>CHEQUE NO.:</b> {cheque_no_str} / {cheque_date_str}"
 
     header_table_data = [[Paragraph(supplier_box_html, body_norm), Paragraph(meta_box_html, body_norm)]]
     t_header = Table(header_table_data, colWidths=[340, 200])
@@ -1565,69 +1592,115 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         ('BOX', (0,0), (-1,-1), 1, colors.black),
         ('INNERGRID', (0,0), (-1,-1), 1, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
+        ('RIGHTPADDING', (0,0), (-1,-1), 6),
     ]))
     story.append(t_header)
     story.append(Spacer(1, 10))
 
-    # Particulars Table
     apv_ref = f"APV#{apv_no}" if apv_no else "Advance Downpayment"
-    desc_text = f"Payment for materials/services ({apv_ref})"
+    po_ref = f"(PO#{po_no_str})" if po_no_str != "-" else ""
+    desc_text = f"Payment for materials / services ({apv_ref}) {po_ref} for {project_str}".strip()
+
     acct_code = "20100" if apv_no else "10500"
     acct_name = supplier if apv_no else f"Advances to Suppliers - {supplier}"
 
     part_data = [
         [Paragraph("<b>A/C CODE</b>", body_norm), Paragraph("<b>A/C NAME</b>", body_norm), Paragraph("<b>DESCRIPTION</b>", body_norm), Paragraph("<b>AMOUNT</b>", body_norm)],
-        [Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(desc_text, body_norm), Paragraph(f"₱{gross_amt:,.2f}", body_norm)]
+        [Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(desc_text, body_norm), Paragraph(f"₱{total_amt:,.2f}", body_norm)]
     ]
     t_part = Table(part_data, colWidths=[70, 150, 230, 90])
     t_part.setStyle(TableStyle([
-        ('BOX',(0,0),(-1,-1),1,colors.black),
-        ('INNERGRID',(0,0),(-1,-1),0.5,colors.black),
-        ('ALIGN',(3,0),(3,-1),'RIGHT'),
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (3,0), (3,-1), 'RIGHT'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
     ]))
     story.append(t_part)
     story.append(Spacer(1, 10))
 
-    # Amount in Words & Totals
+    story.append(Paragraph("<b>Journals:</b>", body_norm))
+    story.append(Spacer(1, 3))
+    
+    # Cleaned duplicate account code "10330:" from "Cash in Bank BDO"
+    j_data = [
+        [Paragraph("<b>Doc No.</b>", body_norm), Paragraph("<b>Date</b>", body_norm), Paragraph("<b>Account #</b>", body_norm), Paragraph("<b>Account Name</b>", body_norm), Paragraph("<b>Debit</b>", body_norm), Paragraph("<b>Credit</b>", body_norm)],
+        [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph("", body_norm)],
+        [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph("10330", body_norm), Paragraph("Cash in Bank BDO", body_norm), Paragraph("", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm)],
+        [Paragraph("", body_norm), Paragraph("", body_norm), Paragraph("", body_norm), Paragraph("<b>TOTAL</b>", body_norm), Paragraph(f"<b>{total_amt:,.2f}</b>", body_norm), Paragraph(f"<b>{total_amt:,.2f}</b>", body_norm)]
+    ]
+    t_j = Table(j_data, colWidths=[65, 65, 65, 185, 80, 80])
+    t_j.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (4,0), (5,-1), 'RIGHT'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(t_j)
+    story.append(Spacer(1, 10))
+
+    doc_data = [
+        [Paragraph("<b>Type</b>", body_norm), Paragraph("<b>Doc. No.</b>", body_norm), Paragraph("<b>Doc. Date</b>", body_norm), Paragraph("<b>Description</b>", body_norm), Paragraph("<b>Orig. Amount</b>", body_norm), Paragraph("<b>Paid Amount</b>", body_norm)],
+        [Paragraph("BIL", body_norm), Paragraph(f"PO#{po_no_str}", body_norm), Paragraph(cv_date, body_norm), Paragraph(f"PAYABLE FOR MATERIALS FOR \"{project_str.upper()}\"", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm)]
+    ]
+    t_doc = Table(doc_data, colWidths=[40, 75, 65, 200, 80, 80])
+    t_doc.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (4,0), (5,-1), 'RIGHT'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(t_doc)
+    story.append(Spacer(1, 10))
+
+    # 2. CONVERT NUMBER TO WORDS USING YOUR HELPER FUNCTION
     try:
-        amt_words = amount_to_words(net_amt)
+        amt_words = amount_to_words(total_amt)
     except Exception:
-        amt_words = f"PHILIPPINE PESO {net_amt:,.2f}"
+        amt_words = f"PHILIPPINE PESO {total_amt:,.2f}"
 
     r_align_style = ParagraphStyle('RAlign', parent=body_norm, alignment=2)
 
-    summary_html = f"GROSS TOTAL: ₱{gross_amt:,.2f}<br/>"
-    if disc_amt > 0:
-        summary_html += f"LESS DISCOUNT: ₱{disc_amt:,.2f}<br/>"
-    if wht_amt > 0:
-        summary_html += f"LESS 2307 EWT ({ewt_code}): ₱{wht_amt:,.2f}<br/>"
-    summary_html += f"NET TOTAL PHP: ₱{net_amt:,.2f}"
-
     words_data = [
-        [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm),
-         Paragraph(summary_html, r_align_style)]
+        [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm), 
+         Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f}<br/>ROUNDING ADJ: 0.00<br/><b>NET TOTAL PHP: ₱{total_amt:,.2f}</b>", r_align_style)]
     ]
     t_words = Table(words_data, colWidths=[360, 180])
     t_words.setStyle(TableStyle([
-        ('BOX',(0,0),(-1,-1),1,colors.black),
-        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
     ]))
     story.append(t_words)
     story.append(Spacer(1, 40))
 
-    # Signatures
     sig_data = [
-        [Paragraph("_____________________________<br/>APPROVED BY", body_norm),
-         Paragraph("_____________________________<br/>RECEIVED BY", body_norm)]
+        [Paragraph("____________________________________<br/><b>APPROVED BY</b>", ParagraphStyle('C1', parent=body_norm, alignment=1)),
+         Paragraph("____________________________________<br/><b>RECEIVED BY</b>", ParagraphStyle('C2', parent=body_norm, alignment=1))]
     ]
-    t_sig = Table(sig_data, colWidths=[270,270])
-    t_sig.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER')]))
+    t_sig = Table(sig_data, colWidths=[270, 270])
+    t_sig.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
     story.append(t_sig)
 
-    # Build PDF
     doc.build(story)
     buffer.seek(0)
-    return buffer.getvalue() 
+    return buffer.getvalue()
 
 #===========================================================================
 from datetime import datetime
@@ -1704,14 +1777,11 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch, mm
 from reportlab.pdfgen import canvas
 
-def create_cheque_pdf(supplier, total_amt, cheque_date_str, discount=0.0, ewt_amount=0.0):
+def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     
     font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
-
-    # Compute Net Check Amount after Less Discount and Less Withholding Tax (EWT)
-    net_amt = float(total_amt or 0) - float(discount or 0) - float(ewt_amount or 0)
 
     # --- GOOGLE SHEETS MARGINS: left=0.745", top=0.40" ---
     left_margin = 0.745 * inch   # ~18.92 mm
@@ -1724,7 +1794,7 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str, discount=0.0, ewt_am
     date_x     = left_margin + (133 * mm)   # Column for Date
     date_y     = top_y - (4 * mm)           # Date Row
 
-    payee_x    = left_margin + (7 * mm)     # Column for Payee
+    payee_x    = left_margin + (7 * mm)    # Column for Payee
     payee_y    = top_y - (13 * mm)          # Payee Row
 
     amt_num_x  = left_margin + (127 * mm)   # Column for Numeric Amount
@@ -1733,7 +1803,7 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str, discount=0.0, ewt_am
     words_x    = left_margin + (3 * mm)     # Column for Amount in Words
     words_y    = top_y - (22 * mm)          # Words Row
 
-    # 1. Print Date with exact Google Apps Script spacing
+    # 1. Print Date with your exact Google Apps Script spacing
     spaced_date = format_cheque_date_exact(cheque_date_str)
     pdf.setFont(font_bold, 10)
     pdf.drawString(date_x, date_y, spaced_date)
@@ -1742,12 +1812,12 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str, discount=0.0, ewt_am
     pdf.setFont(font_bold, 9)
     pdf.drawString(payee_x, payee_y, str(supplier).upper())
 
-    # 3. Print Numeric Amount (Net Amount)
+    # 3. Print Numeric Amount
     pdf.setFont(font_bold, 10)
-    pdf.drawString(amt_num_x, amt_num_y, f"{net_amt:,.2f}")
+    pdf.drawString(amt_num_x, amt_num_y, f"{total_amt:,.2f}")
 
-    # 4. Print Amount in Words (Net Amount)
-    words_text = cheque_amount_to_words(net_amt)
+    # 4. Print Amount in Words
+    words_text = cheque_amount_to_words(total_amt)
     pdf.setFont(font_bold, 9)
     pdf.drawString(words_x, words_y, words_text)
 
@@ -1755,7 +1825,7 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str, discount=0.0, ewt_am
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue()
-#===========================================================================
+    #==============================================================
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -3222,7 +3292,7 @@ elif role == "Accounting":
 
     # ==========================================================================================
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV, PCV & FLOATING CHECKS) ---
-    # ==========================================================================================
+    #===============================================================
     # --- AUTOMATIC SETTLEMENT OF APVs WITH ADVANCE PDCs ---
     try:
         # Find APVs where the PO was already paid via Advance PDC/Downpayment
@@ -3670,49 +3740,20 @@ elif role == "Accounting":
                 existing_disc_row = c.execute("SELECT credit FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,)).fetchone()
                 init_discount_amt = float(existing_disc_row[0]) if existing_disc_row and existing_disc_row[0] else 0.0
 
-                # Fetch existing withholding tax (20400) for this voucher if previously saved
-                existing_wht_row = c.execute("SELECT credit, description FROM journal_entries WHERE voucher_no = ? AND account_code = '20400'", (cv_no,)).fetchone()
-                init_wht_amt = float(existing_wht_row[0]) if existing_wht_row and existing_wht_row[0] else 0.0
-                init_wht_desc = str(existing_wht_row[1]) if existing_wht_row and existing_wht_row[1] else ""
-                
-                # Determine EWT ATC code if saved in description
-                init_ewt_code = "WI160" if "WI160" in init_wht_desc else "WI158"
-
                 st.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier/Payee:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
                 
                 col_btn1, col_btn2 = st.columns(2)
                 
-                # Generate Payment Voucher PDF
-                voucher_pdf = create_cv_pdf(
-                    cv_no=cv_no, 
-                    cv_date=cv_date, 
-                    apv_no=apv_no, 
-                    supplier=supplier, 
-                    pay_method=pay_method, 
-                    total_amt=total_amt, 
-                    conn=conn,
-                    discount=init_discount_amt,
-                    ewt_amt=init_wht_amt,
-                    ewt_code=init_ewt_code
-                )
-
+                voucher_pdf = create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=conn)
                 col_btn1.download_button(
                     label="📄 Print Payment Voucher PDF",
                     data=voucher_pdf,
-                    file_name=f"Payment_Voucher_{cv_no}.pdf",
+                    file_name=f"Voucher_{cv_no}.pdf",
                     mime="application/pdf",
-                    key=f"print_cv_{cv_no}_{idx}"
-                )
-
-                # Generate Cheque PDF
-                cheque_pdf = create_cheque_pdf(
-                    supplier=supplier,
-                    total_amt=total_amt,
-                    cheque_date_str=c_date,
-                    discount=init_discount_amt,
-                    ewt_amount=init_wht_amt
+                    key=f"print_pv_{cv_no}_{idx}"
                 )
                 
+                cheque_pdf = create_cheque_pdf(supplier, total_amt - init_discount_amt, c_date)
                 col_btn2.download_button(
                     label="🎟️ Print Cheque (A4)",
                     data=cheque_pdf,
@@ -3772,17 +3813,9 @@ elif role == "Accounting":
                     
                     # --- BIR FORM 2307 WITHHOLDING TAX OPTIONS ---
                     col_w1, col_w2 = st.columns(2)
-
-                    # Determine initial dropdown index dynamically
-                    if init_wht_amt > 0:
-                        default_wht_idx = 2 if "WI160" in init_ewt_code else 1
-                    else:
-                        default_wht_idx = 0
-
                     wht_option = col_w1.selectbox(
                         "Withholding Tax (BIR Form 2307)",
                         options=["0% (None)", "1% (Goods - WI158)", "2% (Services - WI160)"],
-                        index=default_wht_idx,
                         key=f"edit_wht_opt_{cv_no}_{idx}"
                     )
                     
@@ -3824,7 +3857,7 @@ elif role == "Accounting":
                                 # 1. Fetch supplier details using flexible TRIM/LOWER matching
                                 supp_row = conn.execute(
                                     "SELECT tin_number, location FROM suppliers WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))", 
-                                    (supplier,)
+                                    (supplier_name,)
                                 ).fetchone()
                                 
                                 supplier_tin = supp_row[0] if (supp_row and supp_row[0]) else "000-000-000-000"
@@ -3844,8 +3877,8 @@ elif role == "Accounting":
                                         "period_to": period_to
                                     },
                                     supplier_data={
-                                        "payee_name": supplier,
-                                        "name": supplier,
+                                        "payee_name": supplier_name,
+                                        "name": supplier_name,
                                         "payee_tin": supplier_tin,
                                         "tin": supplier_tin,
                                         "payee_address": supplier_address,
@@ -3906,7 +3939,7 @@ elif role == "Accounting":
                             
                             if computed_tax_withheld > 0:
                                 if has_wht_entry:
-                                    c.execute("UPDATE journal_entries SET credit = ?, description = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, f"EWT {atc_code} withheld for {cv_no}", cv_no))
+                                    c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, cv_no))
                                 else:
                                     existing_ref = c.execute("SELECT ref_no, project_name FROM journal_entries WHERE voucher_no = ? LIMIT 1", (cv_no,)).fetchone()
                                     ref_val = existing_ref[0] if existing_ref else cv_no
