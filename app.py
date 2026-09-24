@@ -1496,7 +1496,8 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     return buffer.getvalue()
 
 # --- CV PDF GENERATOR FUNCTION ---
-def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
+# --- CV PDF GENERATOR FUNCTION (Corrected) ---
+def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None, discount=0.0, ewt_amt=0.0, ewt_code="", **kwargs):
     import os
     from reportlab.lib.pagesizes import letter
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -1506,10 +1507,15 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     from reportlab.pdfbase.ttfonts import TTFont
     from io import BytesIO
 
-    # 1. REGISTER ROBOTO FONT FOR NATIVE ₱ RENDERING
+    # Calculate financial breakdowns
+    gross_amt = float(total_amt or 0.0)
+    disc_amt = float(discount or 0.0)
+    wht_amt = float(ewt_amt or 0.0)
+    net_amt = max(0.0, gross_amt - disc_amt - wht_amt)
+
+    # Register font for ₱ rendering
     pdf_font = "Helvetica"
-    font_candidates = ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]
-    for font_path in font_candidates:
+    for font_path in ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]:
         if os.path.exists(font_path):
             try:
                 pdfmetrics.registerFont(TTFont("Roboto", font_path))
@@ -1519,15 +1525,26 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
                 pass
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, 
-        pagesize=letter,
-        rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36
-    )
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            rightMargin=36, leftMargin=36,
+                            topMargin=36, bottomMargin=36)
     story = []
     styles = getSampleStyleSheet()
 
-    # Fetch Supplier Location
+    # Styles
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName=pdf_font, fontSize=16, leading=20, alignment=1)
+    sub_title_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName=pdf_font, fontSize=9, leading=12, alignment=1)
+    body_norm = ParagraphStyle('BodyNorm', parent=styles['Normal'], fontName=pdf_font, fontSize=8, leading=10)
+
+    # Header
+    story.append(Paragraph("<b>Tuanson Construction</b>", title_style))
+    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_title_style))
+    story.append(Paragraph("Tel: - Fax: -", sub_title_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("<b>Payment Voucher</b>", title_style))
+    story.append(Spacer(1, 10))
+
+    # Supplier + Meta Box
     sup_location = "Cebu, Philippines"
     if conn:
         try:
@@ -1538,52 +1555,8 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         except Exception:
             pass
 
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName=pdf_font, fontSize=16, leading=20, alignment=1)
-    sub_title_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName=pdf_font, fontSize=9, leading=12, alignment=1)
-    body_norm = ParagraphStyle('BodyNorm', parent=styles['Normal'], fontName=pdf_font, fontSize=8, leading=10)
-
-    story.append(Paragraph("<b>Tuanson Construction</b>", title_style))
-    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_title_style))
-    story.append(Paragraph("Tel: - Fax: -", sub_title_style))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("<b>Payment Voucher</b>", title_style))
-    story.append(Spacer(1, 10))
-
-    cheque_no_str = "-"
-    cheque_date_str = "-"
-    po_no_str = "-"
-    project_str = "-"
-
-    if conn:
-        try:
-            c = conn.cursor()
-            # If standard APV payment
-            if apv_no and apv_no.strip():
-                del_row = c.execute("""
-                    SELECT cheque_no, cheque_date, pono, project_name 
-                    FROM deliveries WHERE apv_number = ? AND supplier = ?
-                """, (apv_no, supplier)).fetchone()
-                if del_row:
-                    cheque_no_str = del_row[0] or "-"
-                    cheque_date_str = del_row[1] or "-"
-                    po_no_str = del_row[2] or "-"
-                    project_str = del_row[3] or "-"
-            # If Advance PDC (PO Basis)
-            else:
-                req_row = c.execute("""
-                    SELECT cheque_no, cheque_date, pono, project_name 
-                    FROM requests WHERE cv_number = ? AND supplier = ?
-                """, (cv_no, supplier)).fetchone()
-                if req_row:
-                    cheque_no_str = req_row[0] or "-"
-                    cheque_date_str = req_row[1] or "-"
-                    po_no_str = req_row[2] or "-"
-                    project_str = req_row[3] or "-"
-        except Exception:
-            pass
-
     supplier_box_html = f"<b>{supplier}</b><br/>{sup_location}"
-    meta_box_html = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {cv_date}<br/><b>CHEQUE NO.:</b> {cheque_no_str} / {cheque_date_str}"
+    meta_box_html = f"NO.: {cv_no}<br/>DATE: {cv_date}<br/>CHEQUE NO.: -"
 
     header_table_data = [[Paragraph(supplier_box_html, body_norm), Paragraph(meta_box_html, body_norm)]]
     t_header = Table(header_table_data, colWidths=[340, 200])
@@ -1592,115 +1565,69 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         ('BOX', (0,0), (-1,-1), 1, colors.black),
         ('INNERGRID', (0,0), (-1,-1), 1, colors.black),
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('TOPPADDING', (0,0), (-1,-1), 6),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
-        ('RIGHTPADDING', (0,0), (-1,-1), 6),
     ]))
     story.append(t_header)
     story.append(Spacer(1, 10))
 
+    # Particulars Table
     apv_ref = f"APV#{apv_no}" if apv_no else "Advance Downpayment"
-    po_ref = f"(PO#{po_no_str})" if po_no_str != "-" else ""
-    desc_text = f"Payment for materials / services ({apv_ref}) {po_ref} for {project_str}".strip()
-
+    desc_text = f"Payment for materials/services ({apv_ref})"
     acct_code = "20100" if apv_no else "10500"
     acct_name = supplier if apv_no else f"Advances to Suppliers - {supplier}"
 
     part_data = [
         [Paragraph("<b>A/C CODE</b>", body_norm), Paragraph("<b>A/C NAME</b>", body_norm), Paragraph("<b>DESCRIPTION</b>", body_norm), Paragraph("<b>AMOUNT</b>", body_norm)],
-        [Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(desc_text, body_norm), Paragraph(f"₱{total_amt:,.2f}", body_norm)]
+        [Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(desc_text, body_norm), Paragraph(f"₱{gross_amt:,.2f}", body_norm)]
     ]
     t_part = Table(part_data, colWidths=[70, 150, 230, 90])
     t_part.setStyle(TableStyle([
-        ('FONTNAME', (0,0), (-1,-1), pdf_font),
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN', (3,0), (3,-1), 'RIGHT'),
-        ('TOPPADDING', (0,0), (-1,-1), 5),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('BOX',(0,0),(-1,-1),1,colors.black),
+        ('INNERGRID',(0,0),(-1,-1),0.5,colors.black),
+        ('ALIGN',(3,0),(3,-1),'RIGHT'),
     ]))
     story.append(t_part)
     story.append(Spacer(1, 10))
 
-    story.append(Paragraph("<b>Journals:</b>", body_norm))
-    story.append(Spacer(1, 3))
-    
-    # Cleaned duplicate account code "10330:" from "Cash in Bank BDO"
-    j_data = [
-        [Paragraph("<b>Doc No.</b>", body_norm), Paragraph("<b>Date</b>", body_norm), Paragraph("<b>Account #</b>", body_norm), Paragraph("<b>Account Name</b>", body_norm), Paragraph("<b>Debit</b>", body_norm), Paragraph("<b>Credit</b>", body_norm)],
-        [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph("", body_norm)],
-        [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph("10330", body_norm), Paragraph("Cash in Bank BDO", body_norm), Paragraph("", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm)],
-        [Paragraph("", body_norm), Paragraph("", body_norm), Paragraph("", body_norm), Paragraph("<b>TOTAL</b>", body_norm), Paragraph(f"<b>{total_amt:,.2f}</b>", body_norm), Paragraph(f"<b>{total_amt:,.2f}</b>", body_norm)]
-    ]
-    t_j = Table(j_data, colWidths=[65, 65, 65, 185, 80, 80])
-    t_j.setStyle(TableStyle([
-        ('FONTNAME', (0,0), (-1,-1), pdf_font),
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN', (4,0), (5,-1), 'RIGHT'),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-    ]))
-    story.append(t_j)
-    story.append(Spacer(1, 10))
-
-    doc_data = [
-        [Paragraph("<b>Type</b>", body_norm), Paragraph("<b>Doc. No.</b>", body_norm), Paragraph("<b>Doc. Date</b>", body_norm), Paragraph("<b>Description</b>", body_norm), Paragraph("<b>Orig. Amount</b>", body_norm), Paragraph("<b>Paid Amount</b>", body_norm)],
-        [Paragraph("BIL", body_norm), Paragraph(f"PO#{po_no_str}", body_norm), Paragraph(cv_date, body_norm), Paragraph(f"PAYABLE FOR MATERIALS FOR \"{project_str.upper()}\"", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm)]
-    ]
-    t_doc = Table(doc_data, colWidths=[40, 75, 65, 200, 80, 80])
-    t_doc.setStyle(TableStyle([
-        ('FONTNAME', (0,0), (-1,-1), pdf_font),
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN', (4,0), (5,-1), 'RIGHT'),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-    ]))
-    story.append(t_doc)
-    story.append(Spacer(1, 10))
-
-    # 2. CONVERT NUMBER TO WORDS USING YOUR HELPER FUNCTION
+    # Amount in Words & Totals
     try:
-        amt_words = amount_to_words(total_amt)
+        amt_words = amount_to_words(net_amt)
     except Exception:
-        amt_words = f"PHILIPPINE PESO {total_amt:,.2f}"
+        amt_words = f"PHILIPPINE PESO {net_amt:,.2f}"
 
     r_align_style = ParagraphStyle('RAlign', parent=body_norm, alignment=2)
 
+    summary_html = f"GROSS TOTAL: ₱{gross_amt:,.2f}<br/>"
+    if disc_amt > 0:
+        summary_html += f"LESS DISCOUNT: ₱{disc_amt:,.2f}<br/>"
+    if wht_amt > 0:
+        summary_html += f"LESS 2307 EWT ({ewt_code}): ₱{wht_amt:,.2f}<br/>"
+    summary_html += f"NET TOTAL PHP: ₱{net_amt:,.2f}"
+
     words_data = [
-        [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm), 
-         Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f}<br/>ROUNDING ADJ: 0.00<br/><b>NET TOTAL PHP: ₱{total_amt:,.2f}</b>", r_align_style)]
+        [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm),
+         Paragraph(summary_html, r_align_style)]
     ]
     t_words = Table(words_data, colWidths=[360, 180])
     t_words.setStyle(TableStyle([
-        ('FONTNAME', (0,0), (-1,-1), pdf_font),
-        ('BOX', (0,0), (-1,-1), 1, colors.black),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 5),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('BOX',(0,0),(-1,-1),1,colors.black),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
     ]))
     story.append(t_words)
     story.append(Spacer(1, 40))
 
+    # Signatures
     sig_data = [
-        [Paragraph("____________________________________<br/><b>APPROVED BY</b>", ParagraphStyle('C1', parent=body_norm, alignment=1)),
-         Paragraph("____________________________________<br/><b>RECEIVED BY</b>", ParagraphStyle('C2', parent=body_norm, alignment=1))]
+        [Paragraph("_____________________________<br/>APPROVED BY", body_norm),
+         Paragraph("_____________________________<br/>RECEIVED BY", body_norm)]
     ]
-    t_sig = Table(sig_data, colWidths=[270, 270])
-    t_sig.setStyle(TableStyle([
-        ('FONTNAME', (0,0), (-1,-1), pdf_font),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-    ]))
+    t_sig = Table(sig_data, colWidths=[270,270])
+    t_sig.setStyle(TableStyle([('ALIGN',(0,0),(-1,-1),'CENTER')]))
     story.append(t_sig)
 
+    # Build PDF
     doc.build(story)
     buffer.seek(0)
-    return buffer.getvalue()
+    return buffer.getvalue() 
 
 #===========================================================================
 from datetime import datetime
