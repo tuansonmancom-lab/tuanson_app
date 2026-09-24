@@ -2109,11 +2109,11 @@ else:
     setup_auto_logout(timeout_minutes=5)
 
     st.sidebar.success("Status: Online")
-    if st.sidebar.button("Logout"):
-        st.session_state.clear()
-        st.rerun()
+    #if st.sidebar.button("Logout"):
+    #    st.session_state.clear()
+    #    st.rerun()
 
-    st.title("🏗️ Tuanson Construction App")
+    #st.title("🏗️ Tuanson Construction App")
     st.write("Welcome back! Your session is active.")
 #====================
 
