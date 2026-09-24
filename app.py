@@ -3749,12 +3749,18 @@ elif role == "Accounting":
                 
                 voucher_pdf = create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=conn)
                 # Pass total_amt along with discount and EWT/Withholding Tax
+                # Calculate EWT amount before generating PDF (e.g., 1% = 0.01)
+                # Replace tax_rate with your dropdown rate variable, or hardcode 0.01 if 1% is selected
+                ewt_rate = 0.01  # Change to your tax rate variable if dynamic
+                ewt_amt = round((total_amt - init_discount_amt) * ewt_rate, 2)
+                
+                # Generate Cheque PDF
                 cheque_pdf = create_cheque_pdf(
                     supplier=supplier,
                     total_amt=total_amt,
                     cheque_date_str=c_date,
                     discount=init_discount_amt,
-                    ewt_amount=ewt_amt  # Replace 'ewt_amt' with your variable name for withholding tax
+                    ewt_amount=ewt_amt
                 )
                 
                 col_btn2.download_button(
