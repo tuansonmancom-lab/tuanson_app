@@ -1777,11 +1777,14 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch, mm
 from reportlab.pdfgen import canvas
 
-def create_cheque_pdf(supplier, total_amt, cheque_date_str):
+def create_cheque_pdf(supplier, total_amt, cheque_date_str, discount=0.0, ewt_amount=0.0):
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     
     font_bold = "Roboto-Bold" if ROBOTO_READY else "Helvetica-Bold"
+
+    # Compute Net Check Amount after Less Discount and Less Withholding Tax (EWT)
+    net_amt = float(total_amt or 0) - float(discount or 0) - float(ewt_amount or 0)
 
     # --- GOOGLE SHEETS MARGINS: left=0.745", top=0.40" ---
     left_margin = 0.745 * inch   # ~18.92 mm
@@ -1794,7 +1797,7 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     date_x     = left_margin + (133 * mm)   # Column for Date
     date_y     = top_y - (4 * mm)           # Date Row
 
-    payee_x    = left_margin + (7 * mm)    # Column for Payee
+    payee_x    = left_margin + (7 * mm)     # Column for Payee
     payee_y    = top_y - (13 * mm)          # Payee Row
 
     amt_num_x  = left_margin + (127 * mm)   # Column for Numeric Amount
@@ -1803,7 +1806,7 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     words_x    = left_margin + (3 * mm)     # Column for Amount in Words
     words_y    = top_y - (22 * mm)          # Words Row
 
-    # 1. Print Date with your exact Google Apps Script spacing
+    # 1. Print Date with exact Google Apps Script spacing
     spaced_date = format_cheque_date_exact(cheque_date_str)
     pdf.setFont(font_bold, 10)
     pdf.drawString(date_x, date_y, spaced_date)
@@ -1812,12 +1815,12 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     pdf.setFont(font_bold, 9)
     pdf.drawString(payee_x, payee_y, str(supplier).upper())
 
-    # 3. Print Numeric Amount
+    # 3. Print Numeric Amount (Net Amount)
     pdf.setFont(font_bold, 10)
-    pdf.drawString(amt_num_x, amt_num_y, f"{total_amt:,.2f}")
+    pdf.drawString(amt_num_x, amt_num_y, f"{net_amt:,.2f}")
 
-    # 4. Print Amount in Words
-    words_text = cheque_amount_to_words(total_amt)
+    # 4. Print Amount in Words (Net Amount)
+    words_text = cheque_amount_to_words(net_amt)
     pdf.setFont(font_bold, 9)
     pdf.drawString(words_x, words_y, words_text)
 
@@ -1825,7 +1828,7 @@ def create_cheque_pdf(supplier, total_amt, cheque_date_str):
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue()
-    #==============================================================
+#===========================================================================
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -3745,15 +3748,15 @@ elif role == "Accounting":
                 col_btn1, col_btn2 = st.columns(2)
                 
                 voucher_pdf = create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=conn)
-                col_btn1.download_button(
-                    label="📄 Print Payment Voucher PDF",
-                    data=voucher_pdf,
-                    file_name=f"Voucher_{cv_no}.pdf",
-                    mime="application/pdf",
-                    key=f"print_pv_{cv_no}_{idx}"
+                # Pass total_amt along with discount and EWT/Withholding Tax
+                cheque_pdf = create_cheque_pdf(
+                    supplier=supplier,
+                    total_amt=total_amt,
+                    cheque_date_str=c_date,
+                    discount=init_discount_amt,
+                    ewt_amount=ewt_amt  # Replace 'ewt_amt' with your variable name for withholding tax
                 )
                 
-                cheque_pdf = create_cheque_pdf(supplier, total_amt - init_discount_amt, c_date)
                 col_btn2.download_button(
                     label="🎟️ Print Cheque (A4)",
                     data=cheque_pdf,
