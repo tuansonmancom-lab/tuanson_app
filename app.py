@@ -7,6 +7,22 @@ from datetime import datetime
 from io import BytesIO
 from datetime import datetime, timedelta
 
+#===============================================
+from datetime import datetime, timedelta
+
+def update_user_heartbeat(username):
+    """Updates the user's last_seen timestamp in the database."""
+    if username:
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        c.execute("UPDATE users SET last_seen = ? WHERE username = ?", (now_str, username))
+        conn.commit()
+
+def mark_user_offline(username):
+    """Clears or sets the user's last_seen to null upon manual logout."""
+    if username:
+        c.execute("UPDATE users SET last_seen = NULL WHERE username = ?", (username,))
+        conn.commit()
+#=============================================================
 #==========================================log out automatic
 import streamlit as st
 import streamlit.components.v1 as components
@@ -1168,6 +1184,13 @@ def init_db():
             ('60200', 'Direct Cost Materials', 'Expense')
         ])
 
+    # Add last_seen column if it doesn't exist
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN last_seen TEXT")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
+
     conn.commit()
 
 init_db()
@@ -2115,6 +2138,22 @@ else:
 
     #st.title("🏗️ Tuanson Construction App")
     st.write("Welcome back! Your session is active.")
+#====================
+# --- INSIDE MAIN APP LOOP (AFTER LOGIN CHECK) ---
+if st.session_state.get("logged_in"):
+    current_user = st.session_state.get("username")
+    
+    # 1. Update heartbeat on every Streamlit interaction
+    update_user_heartbeat(current_user)
+    
+    # 2. Maintain your 5-minute auto-logout timer
+    setup_auto_logout(timeout_minutes=5)
+
+    # 3. Handle manual logout
+    if st.sidebar.button("Logout"):
+        mark_user_offline(current_user)
+        st.session_state.clear()
+        st.rerun()
 #====================
 
 role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.available_roles)
@@ -4115,6 +4154,67 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
+                    def render_online_users_dashboard():
+                        
+                    #===================================================================    
+                    st.write("### 👥 Live Active Users & System Presence")
+                
+                    # Fetch all users with their roles and last_seen timestamp
+                    users_df = pd.read_sql_query("""
+                        SELECT username AS 'Username', 
+                               full_name AS 'Full Name', 
+                               role AS 'Role', 
+                               last_seen AS 'Last Active'
+                        FROM users
+                        ORDER BY last_seen DESC
+                    """, conn)
+                
+                    if not users_df.empty:
+                        now = datetime.now()
+                
+                        def evaluate_presence(last_seen_str):
+                            if pd.isna(last_seen_str) or not last_seen_str:
+                                return "🔴 Offline"
+                            try:
+                                last_dt = datetime.strptime(str(last_seen_str), '%Y-%m-%d %H:%M:%S')
+                                time_diff = (now - last_dt).total_seconds() / 60.0
+                                
+                                # Active within 5 minutes = Online
+                                if time_diff <= 5:
+                                    return f"🟢 Online ({int(time_diff)}m ago)"
+                                elif time_diff <= 15:
+                                    return f"🟡 Idle ({int(time_diff)}m ago)"
+                                else:
+                                    return "🔴 Offline"
+                            except Exception:
+                                return "🔴 Offline"
+                
+                        users_df['Status'] = users_df['Last Active'].apply(evaluate_presence)
+                
+                        # Summary Metrics
+                        online_count = len(users_df[users_df['Status'].str.contains("🟢")])
+                        idle_count = len(users_df[users_df['Status'].str.contains("🟡")])
+                        offline_count = len(users_df[users_df['Status'].str.contains("🔴")])
+                
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("🟢 Online Users", online_count)
+                        col2.metric("🟡 Idle Users", idle_count)
+                        col3.metric("🔴 Offline Users", offline_count)
+                
+                        st.markdown("---")
+                
+                        # Display filterable user table
+                        role_filter = st.multiselect("Filter by Role:", options=users_df['Role'].unique().tolist(), default=users_df['Role'].unique().tolist())
+                        filtered_df = users_df[users_df['Role'].isin(role_filter)]
+                
+                        st.dataframe(
+                            filtered_df[['Status', 'Username', 'Full Name', 'Role', 'Last Active']],
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No registered users found.")
+                        #==================================================
     #==============================================================================================        
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
