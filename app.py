@@ -7,6 +7,31 @@ from datetime import datetime
 from io import BytesIO
 from datetime import datetime, timedelta
 
+#==========================================log out automatic
+import streamlit as st
+import streamlit.components.v1 as components
+
+def setup_auto_logout(timeout_minutes=5):
+    """
+    Injects a JavaScript idle timer into Streamlit.
+    Resets on mouse move, key press, click, or scroll.
+    Triggers auto-logout query parameter when timer expires.
+    """
+    # 1. Check if auto_logout signal was sent via URL query params
+    if st.query_params.get("auto_logout") == "true":
+        st.query_params.clear()
+        st.session_state.clear()  # Clears user session / logged-in state
+        st.warning("⚠️ You were automatically logged out due to 5 minutes of inactivity.")
+        st.rerun()
+
+    # 2. Inject JavaScript listener if user is logged in
+    timeout_ms = timeout_minutes * 60 * 1000  # Convert minutes to milliseconds
+    
+    js_code = f"""
+    
+    """
+    components.html(js_code, height=0, width=0)
+    #==========================================log out automatic
 #=============================Fetch Email add
 def get_user_email_by_role(role_name, conn):
     """Fetch the email address of the user assigned to a specific role."""
@@ -2062,7 +2087,36 @@ st.sidebar.markdown("---")
 if not st.session_state.available_roles:
     st.warning("You have no roles assigned. Please contact the Admin.")
     st.stop()
+
+#====================
+# --- MAIN APP FLOW ---
+if "logged_in" not in st.session_state or not st.session_state["logged_in"]:
+    # Show Login Form
+    st.title("🔑 Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
     
+    if st.button("Login"):
+        if username == "admin" and password == "1234":
+            st.session_state["logged_in"] = True
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
+
+else:
+    # --- USER IS LOGGED IN ---
+    # Activate the 5-minute inactivity auto-logout timer
+    setup_auto_logout(timeout_minutes=5)
+
+    st.sidebar.success("Status: Online")
+    if st.sidebar.button("Logout"):
+        st.session_state.clear()
+        st.rerun()
+
+    st.title("🏗️ Tuanson Construction App")
+    st.write("Welcome back! Your session is active.")
+#====================
+
 role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.available_roles)
 
 # --- ROLE 1: REQUISITOR ---
