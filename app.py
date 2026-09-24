@@ -3295,7 +3295,7 @@ elif role == "Accounting":
 
     # ==========================================================================================
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV, PCV & FLOATING CHECKS) ---
-    #===============================================================
+    # ==========================================================================================
     # --- AUTOMATIC SETTLEMENT OF APVs WITH ADVANCE PDCs ---
     try:
         # Find APVs where the PO was already paid via Advance PDC/Downpayment
@@ -3743,24 +3743,47 @@ elif role == "Accounting":
                 existing_disc_row = c.execute("SELECT credit FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,)).fetchone()
                 init_discount_amt = float(existing_disc_row[0]) if existing_disc_row and existing_disc_row[0] else 0.0
 
+                # Fetch existing withholding tax (20400) for this voucher if previously saved
+                existing_wht_row = c.execute("SELECT credit, description FROM journal_entries WHERE voucher_no = ? AND account_code = '20400'", (cv_no,)).fetchone()
+                init_wht_amt = float(existing_wht_row[0]) if existing_wht_row and existing_wht_row[0] else 0.0
+                init_wht_desc = str(existing_wht_row[1]) if existing_wht_row and existing_wht_row[1] else ""
+                
+                # Determine EWT ATC code if saved in description
+                init_ewt_code = "WI160" if "WI160" in init_wht_desc else "WI158"
+
                 st.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier/Payee:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
                 
                 col_btn1, col_btn2 = st.columns(2)
                 
-                voucher_pdf = create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=conn)
-                # Pass total_amt along with discount and EWT/Withholding Tax
-                # Calculate EWT amount before generating PDF (e.g., 1% = 0.01)
-                # Replace tax_rate with your dropdown rate variable, or hardcode 0.01 if 1% is selected
-                ewt_rate = 0.01  # Change to your tax rate variable if dynamic
-                ewt_amt = round((total_amt - init_discount_amt) * ewt_rate, 2)
-                
+                # Generate Payment Voucher PDF
+                voucher_pdf = create_cv_pdf(
+                    cv_no=cv_no, 
+                    cv_date=cv_date, 
+                    apv_no=apv_no, 
+                    supplier=supplier, 
+                    pay_method=pay_method, 
+                    total_amt=total_amt, 
+                    conn=conn,
+                    discount=init_discount_amt,
+                    ewt_amt=init_wht_amt,
+                    ewt_code=init_ewt_code
+                )
+
+                col_btn1.download_button(
+                    label="📄 Print Payment Voucher PDF",
+                    data=voucher_pdf,
+                    file_name=f"Payment_Voucher_{cv_no}.pdf",
+                    mime="application/pdf",
+                    key=f"print_cv_{cv_no}_{idx}"
+                )
+
                 # Generate Cheque PDF
                 cheque_pdf = create_cheque_pdf(
                     supplier=supplier,
                     total_amt=total_amt,
                     cheque_date_str=c_date,
                     discount=init_discount_amt,
-                    ewt_amount=ewt_amt
+                    ewt_amount=init_wht_amt
                 )
                 
                 col_btn2.download_button(
@@ -3822,9 +3845,17 @@ elif role == "Accounting":
                     
                     # --- BIR FORM 2307 WITHHOLDING TAX OPTIONS ---
                     col_w1, col_w2 = st.columns(2)
+
+                    # Determine initial dropdown index dynamically
+                    if init_wht_amt > 0:
+                        default_wht_idx = 2 if "WI160" in init_ewt_code else 1
+                    else:
+                        default_wht_idx = 0
+
                     wht_option = col_w1.selectbox(
                         "Withholding Tax (BIR Form 2307)",
                         options=["0% (None)", "1% (Goods - WI158)", "2% (Services - WI160)"],
+                        index=default_wht_idx,
                         key=f"edit_wht_opt_{cv_no}_{idx}"
                     )
                     
@@ -3866,7 +3897,7 @@ elif role == "Accounting":
                                 # 1. Fetch supplier details using flexible TRIM/LOWER matching
                                 supp_row = conn.execute(
                                     "SELECT tin_number, location FROM suppliers WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))", 
-                                    (supplier_name,)
+                                    (supplier,)
                                 ).fetchone()
                                 
                                 supplier_tin = supp_row[0] if (supp_row and supp_row[0]) else "000-000-000-000"
@@ -3886,8 +3917,8 @@ elif role == "Accounting":
                                         "period_to": period_to
                                     },
                                     supplier_data={
-                                        "payee_name": supplier_name,
-                                        "name": supplier_name,
+                                        "payee_name": supplier,
+                                        "name": supplier,
                                         "payee_tin": supplier_tin,
                                         "tin": supplier_tin,
                                         "payee_address": supplier_address,
@@ -3948,7 +3979,7 @@ elif role == "Accounting":
                             
                             if computed_tax_withheld > 0:
                                 if has_wht_entry:
-                                    c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, cv_no))
+                                    c.execute("UPDATE journal_entries SET credit = ?, description = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, f"EWT {atc_code} withheld for {cv_no}", cv_no))
                                 else:
                                     existing_ref = c.execute("SELECT ref_no, project_name FROM journal_entries WHERE voucher_no = ? LIMIT 1", (cv_no,)).fetchone()
                                     ref_val = existing_ref[0] if existing_ref else cv_no
