@@ -1654,7 +1654,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(Spacer(1, 10))
 
     # --- 3. VOUCHER INFO HEADER BOX ---
-    info_data = [[Paragraph(f"**{supplier}**Subcon", style_normal),Paragraph(f"NO.: {cv_no} <br/>DATE: {cv_date} <br/>CHEQUE NO.: {cheque_no or '-'} / {cheque_date_str}", style_normal)]]
+    info_data = [[Paragraph(f"{supplier} Subcon", style_normal),Paragraph(f"NO.: {cv_no} <br/>DATE: {cv_date} <br/>CHEQUE NO.: {cheque_no or '-'} / {cheque_date_str}", style_normal)]]
     info_table = Table(info_data, colWidths=[360, 180])
     info_table.setStyle(TableStyle([
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
@@ -1770,7 +1770,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         summary_box_data = [
             [
                 left_content,
-                Paragraph(f"**SUB TOTAL:** ₱{total_amt:,.2f} <br/>ROUNDING ADJ: 0.00 <br/>NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
+                Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} <br/>ROUNDING ADJ: 0.00 <br/>NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
             ]
         ]
     summary_table = Table(summary_box_data, colWidths=[360, 180])
