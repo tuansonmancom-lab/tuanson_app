@@ -1676,7 +1676,9 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(Spacer(1, 8))
 
     # --- 4. MAIN ACCOUNT TABLE ---
-    desc_text = f"Payment for materials / services ({apv_no or cv_no})"if po_no: desc_text += f" (PO#{po_no})"if project_desc: desc_text += f" for {project_desc}"
+    desc_text = f"Payment for materials / services ({apv_no or cv_no})"
+    if po_no: desc_text += f" (PO#{po_no})"
+    if project_desc: desc_text += f" for {project_desc}"
 
     acct_summary_data = [["A/C CODE", "A/C NAME", "DESCRIPTION", "AMOUNT"],["20100", supplier, Paragraph(desc_text, style_normal), f"₱{total_amt:,.2f}"]]
     acct_table = Table(acct_summary_data, colWidths=[70, 130, 240, 100])
