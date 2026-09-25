@@ -1724,8 +1724,9 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     gl_table.setStyle(TableStyle([
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
         ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTNAME', (3, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
+        ('FONTNAME', (0, 1), (-1, -2), 'Roboto'),
+        ('FONTNAME', (0, -1), (-1, -1), 'Roboto-Bold'),
         ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('ALIGN', (4, 0), (5, -1), 'RIGHT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -1745,7 +1746,8 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     bill_table.setStyle(TableStyle([
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
         ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Roboto'),
         ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('ALIGN', (4, 0), (5, -1), 'RIGHT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -1789,7 +1791,8 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     sig_table = Table(sig_data, colWidths=[270, 270])
     sig_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Roboto'),
+        ('FONTNAME', (0, 1), (-1, 1), 'Roboto-Bold'),
         ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('PADDING', (0, 0), (-1, -1), 2),
     ]))
