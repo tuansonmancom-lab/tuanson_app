@@ -1744,10 +1744,8 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(Spacer(1, 10))
 
     # --- 6. BILLS / REFERENCE DOCS TABLE ---
-        bill_data = [["Type", "Doc. No.", "Doc. Date", "Description",
-        "Orig. Amount", "Paid Amount"],["BIL", po_no or apv_no or cv_no,
-        cv_date, Paragraph(project_desc or desc_text, style_normal),
-        f"{total_amt:,.2f}", f"{total_amt:,.2f}"] ]
+        bill_data = [["Type", "Doc. No.", "Doc. Date", "Description", "Orig. Amount", "Paid Amount"],["BIL", po_no or apv_no or cv_no, cv_date, 
+        Paragraph(project_desc or desc_text, style_normal), f"{total_amt:,.2f}", f"{total_amt:,.2f}"]]
     bill_table = Table(bill_data, colWidths=[40, 90, 65, 185, 80, 80])
     bill_table.setStyle(TableStyle([
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
