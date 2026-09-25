@@ -1665,7 +1665,11 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     # --- 3. VOUCHER INFO HEADER BOX ---
     info_data = [[Paragraph(f"**{supplier}**Subcon", style_normal),Paragraph(f"NO.: {cv_no}DATE: {cv_date}CHEQUE NO.: {cheque_no or '-'} / {cheque_date_str}", style_normal)]]
     info_table = Table(info_data, colWidths=[360, 180])
-    info_table.setStyle(TableStyle([('BOX', (0, 0), (-1, -1), 1, colors.black),('VALIGN', (0, 0), (-1, -1), 'TOP'),'INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),('PADDING', (0, 0), (-1, -1), 6),]))
+    info_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        'INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 6),]))
     story.append(info_table)
     story.append(Spacer(1, 8))
 
