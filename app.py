@@ -1777,7 +1777,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         summary_box_data = [
             [
                 left_content,
-                Paragraph(f"**SUB TOTAL:** ₱{total_amt:,.2f} ROUNDING ADJ: 0.00 NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
+                Paragraph(f"**SUB TOTAL:** ₱{total_amt:,.2f} <br/>ROUNDING ADJ: 0.00 <br/>NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
             ]
         ]
     summary_table = Table(summary_box_data, colWidths=[360, 180])
