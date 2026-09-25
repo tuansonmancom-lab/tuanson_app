@@ -1764,7 +1764,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(Spacer(1, 12))
 
     # --- 7. AMOUNT IN WORDS, DYNAMIC EWT NOTE & TOTALS SECTION ---
-    amount_in_words_str = num_to_words(total_amt)
+    amount_in_words_str = amount_to_words(total_amt)
 
     # Left cell contains AMOUNT IN WORDS and optional Notes line if EWT exists
     left_content = [
@@ -1777,7 +1777,7 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
         summary_box_data = [
             [
                 left_content,
-                Paragraph(f"**SUB TOTAL:** ₱{total_amt:,.2f} <br>ROUNDING ADJ: 0.00 NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
+                Paragraph(f"**SUB TOTAL:** ₱{total_amt:,.2f} ROUNDING ADJ: 0.00 NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
             ]
         ]
     summary_table = Table(summary_box_data, colWidths=[360, 180])
