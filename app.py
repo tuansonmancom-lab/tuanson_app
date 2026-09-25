@@ -1768,10 +1768,8 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
 
     # Left cell contains AMOUNT IN WORDS and optional Notes line if EWT exists
     left_content = [
-        Paragraph(f"**AMOUNT IN WORDS:**
-
-    {amount_in_words_str}", style_normal)
-    ]
+            Paragraph(f"**AMOUNT IN WORDS:** {amount_in_words_str}", style_normal)
+        ]
     if ewt_note_line:
     left_content.append(Spacer(1, 6))
     left_content.append(Paragraph(f"{ewt_note_line}", style_bold))
