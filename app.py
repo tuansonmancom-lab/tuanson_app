@@ -1551,20 +1551,23 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, 
 from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle 
 from reportlab.lib import colors
 
-def num_to_words(amount):
-    """Simple converter for amount to words (can be replaced with num2words library if installed)."""
-    try:
-        from num2words import num2words
-        return num2words(amount, lang='en').upper() + " PESOS ONLY"
-    except ImportError:
-        # Fallback basic string representation
-        pesos = int(amount)
-        cents = int(round((amount - pesos) * 100))
-        if cents > 0:
-            return f"PHILIPPINE PESO {pesos:,} AND {cents}/100 ONLY"
-        return f"PHILIPPINE PESO {pesos:,} PESOS ONLY"
-
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
+    # Register font for ₱ rendering
+    pdf_font = "Helvetica"
+    for font_path in ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]:
+        if os.path.exists(font_path):
+            try:
+                pdfmetrics.registerFont(TTFont("Roboto", font_path))
+                pdf_font = "Roboto"
+                break
+            except Exception:
+                pass
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                            rightMargin=36, leftMargin=36,
+                            topMargin=36, bottomMargin=36)
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
