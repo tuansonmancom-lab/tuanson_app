@@ -1548,8 +1548,8 @@ from io import BytesIO
 from datetime import datetime 
 from reportlab.lib.pagesizes import letter 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, KeepTogether 
-from reportlab.lib.styles import getSampleStyleSheet,
-ParagraphStyle from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle 
+from reportlab.lib import colors
 
 def num_to_words(amount):
     """Simple converter for amount to words (can be replaced with num2words library if installed)."""
