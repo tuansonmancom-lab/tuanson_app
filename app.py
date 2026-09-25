@@ -1675,7 +1675,8 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     acct_table.setStyle(TableStyle([
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
             ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Roboto'),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
