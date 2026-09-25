@@ -1544,10 +1544,11 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     return buffer.getvalue()
 
 # --- CV PDF GENERATOR FUNCTION ---
-from io import BytesIO from datetime import datetime from
-reportlab.lib.pagesizes import letter from reportlab.platypus import
-SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer,
-KeepTogether from reportlab.lib.styles import getSampleStyleSheet,
+from io import BytesIO 
+from datetime import datetime 
+from reportlab.lib.pagesizes import letter 
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, KeepTogether 
+from reportlab.lib.styles import getSampleStyleSheet,
 ParagraphStyle from reportlab.lib import colors
 
 def num_to_words(amount):
