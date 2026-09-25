@@ -1552,31 +1552,6 @@ from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle
 from reportlab.lib import colors
 
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
-    import os
-    from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib import colors
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    from io import BytesIO
-    
-    # Register font for ₱ rendering
-    pdf_font = "Helvetica"
-    for font_path in ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]:
-        if os.path.exists(font_path):
-            try:
-                pdfmetrics.registerFont(TTFont("Roboto", font_path))
-                pdf_font = "Roboto"
-                break
-            except Exception:
-                pass
-
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter,
-                            rightMargin=36, leftMargin=36,
-                            topMargin=36, bottomMargin=36)
-
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -1589,14 +1564,17 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story = []
     
     styles = getSampleStyleSheet()
+    
+    # --- UPDATED PARAGRAPH STYLES ---
     style_normal = styles['Normal']
+    style_normal.fontName = 'Roboto'
     style_normal.fontSize = 8
     style_normal.leading = 10
     
-    style_bold = ParagraphStyle('BoldText', parent=style_normal, fontName='Helvetica-Bold')
-    style_title = ParagraphStyle('DocTitle', parent=style_normal, fontName='Helvetica-Bold', fontSize=14, leading=16, alignment=1)
-    style_header = ParagraphStyle('CompHeader', parent=style_normal, fontName='Helvetica-Bold', fontSize=12, leading=14, alignment=1)
-    style_subhead = ParagraphStyle('CompSub', parent=style_normal, fontSize=8, leading=10, alignment=1)
+    style_bold = ParagraphStyle('BoldText', parent=style_normal, fontName='Roboto-Bold')
+    style_title = ParagraphStyle('DocTitle', parent=style_normal, fontName='Roboto-Bold', fontSize=14, leading=16, alignment=1)
+    style_header = ParagraphStyle('CompHeader', parent=style_normal, fontName='Roboto-Bold', fontSize=12, leading=14, alignment=1)
+    style_subhead = ParagraphStyle('CompSub', parent=style_normal, fontName='Roboto', fontSize=8, leading=10, alignment=1)
 
     # --- 1. FETCH ALL JOURNAL ENTRIES & CHEQUE DETAILS FROM DATABASE ---
     gl_entries = []
