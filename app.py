@@ -3385,6 +3385,8 @@ elif role == "Accounting":
 
     # ==========================================================================================
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV, PCV & FLOATING CHECKS) ---
+    # ==========================================================================================
+    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV, PCV & FLOATING CHECKS) ---
     #===============================================================
     # --- AUTOMATIC SETTLEMENT OF APVs WITH ADVANCE PDCs ---
     try:
@@ -3538,7 +3540,6 @@ elif role == "Accounting":
                 st.info("No pending APVs available for payment.")
     
         elif pay_basis == "Advance PDC / Downpayment (PO Basis)":
-            # --- FILTERED: Only fetch POs for suppliers flagged with requires_advance_pdc = 'Yes' ---
             unpaid_pos = c.execute("""
                 SELECT r.pono, r.supplier, SUM(r.amount) AS total_amount, r.project_name 
                 FROM requests r
@@ -3633,14 +3634,42 @@ elif role == "Accounting":
                 )
                 is_floating_check = st.checkbox("🎟️ Print Blank Date on Cheque (Open Date / Floating Check)", value=False)
     
-            # Preview GL Account Routing based on Floating Check status
+            # --- BIR FORM 2307 WITHHOLDING TAX OPTIONS (Added to Payment Processing Form) ---
+            col_w1, col_w2 = st.columns(2)
+            wht_option = col_w1.selectbox(
+                "Withholding Tax (BIR Form 2307)",
+                options=["0% (None)", "1% (Goods - WI158)", "2% (Services - WI160)"],
+                key=f"proc_wht_{pay_basis.replace(' ', '_')}"
+            )
+    
+            if "1%" in wht_option:
+                wht_rate = 0.01
+                atc_code = "WI158"
+                income_type = "PURCHASE OF GOODS"
+            elif "2%" in wht_option:
+                wht_rate = 0.02
+                atc_code = "WI160"
+                income_type = "PURCHASE OF SERVICES"
+            else:
+                wht_rate = 0.0
+                atc_code = ""
+                income_type = ""
+    
+            computed_tax_withheld = round(total_amt * wht_rate, 2)
+            net_disbursement = max(0.0, round(total_amt - computed_tax_withheld, 2))
+    
+            col_w2.metric("Computed Tax Withheld (2307)", f"₱{computed_tax_withheld:,.2f}")
+    
+            # Preview GL Account Routing based on Floating Check & 2307 Withholding status
             credit_preview_code = "20200" if (is_floating_check and pay_method == "Check") else selected_bank_code
             credit_preview_name = "Checks Payable / PDC Issued" if (is_floating_check and pay_method == "Check") else selected_bank_name
+    
+            wht_preview_str = f"\n* **Credit:** Withholding Tax Payable - Expanded (Code 20400) — ₱{computed_tax_withheld:,.2f}" if computed_tax_withheld > 0 else ""
     
             st.info(f"""
             💡 **Accounting Entry Preview:**
             * **Debit:** {debit_acct_name} (Code {debit_acct_code}) — ₱{total_amt:,.2f}
-            * **Credit:** {credit_preview_name} (Code {credit_preview_code}) — ₱{total_amt:,.2f}
+            * **Credit:** {credit_preview_name} (Code {credit_preview_code}) — ₱{net_disbursement:,.2f}{wht_preview_str}
             """)
     
             if st.button("✅ Process Payment & Issue Voucher", type="primary"):
@@ -3682,23 +3711,32 @@ elif role == "Accounting":
                         """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, po_val))
     
                     # Insert General Ledger Entries
+                    # 1. Debit Account (Gross Amount)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
                     """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, ref_doc, cv_debit_desc, project_name))
     
+                    # 2. Credit Bank / Cash Account (Net Disbursement Amount)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), credit_preview_code, credit_preview_name, total_amt, ref_doc, cv_credit_desc, project_name))
+                    """, (current_time, cv_input.strip(), credit_preview_code, credit_preview_name, net_disbursement, ref_doc, cv_credit_desc, project_name))
+    
+                    # 3. Credit Withholding Tax Payable (Code 20400) if 2307 is applied
+                    if computed_tax_withheld > 0:
+                        c.execute("""
+                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
+                            VALUES (?, ?, '20400', 'Withholding Tax Payable - Expanded', 0.0, ?, ?, ?, ?)
+                        """, (current_time, cv_input.strip(), computed_tax_withheld, ref_doc, f"EWT {atc_code} withheld for {cv_input.strip()}", project_name))
     
                     # If Open-Dated Floating Check, insert record into Turso floating_checks table
                     if is_floating_check and pay_method == "Check":
                         c.execute("""
                             INSERT INTO floating_checks 
-                            (voucher_no, supplier_name, check_no, amount, voucher_date, check_date, status, bank_account_code, project_name, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, 'Floating', ?, ?, ?)
-                        """, (cv_input.strip(), supplier_name, cheque_no_input.strip(), total_amt, current_time, c_date_str, selected_bank_code, project_name, current_time))
+                            (voucher_no, supplier_name, check_no, gross_amount, wht_rate, wht_atc, wht_amount, amount, voucher_date, check_date, status, bank_account_code, project_name, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Floating', ?, ?, ?)
+                        """, (cv_input.strip(), supplier_name, cheque_no_input.strip(), total_amt, wht_rate, atc_code, computed_tax_withheld, net_disbursement, current_time, c_date_str, selected_bank_code, project_name, current_time))
     
                     conn.commit()
                     st.success(f"🎉 Voucher {cv_input.strip()} recorded successfully!")
@@ -3832,7 +3870,19 @@ elif role == "Accounting":
                 # Fetch existing purchase discount for this voucher if previously saved
                 existing_disc_row = c.execute("SELECT credit FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,)).fetchone()
                 init_discount_amt = float(existing_disc_row[0]) if existing_disc_row and existing_disc_row[0] else 0.0
-
+    
+                # Fetch existing WHT rate/amount for this voucher if available
+                existing_wht_row = c.execute("SELECT credit, description FROM journal_entries WHERE voucher_no = ? AND account_code = '20400'", (cv_no,)).fetchone()
+                init_wht_amt = float(existing_wht_row[0]) if existing_wht_row and existing_wht_row[0] else 0.0
+                
+                wht_desc = str(existing_wht_row[1]) if existing_wht_row and existing_wht_row[1] else ""
+                if "WI158" in wht_desc:
+                    init_wht_idx = 1
+                elif "WI160" in wht_desc:
+                    init_wht_idx = 2
+                else:
+                    init_wht_idx = 0
+    
                 st.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier/Payee:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
                 
                 col_btn1, col_btn2 = st.columns(2)
@@ -3846,7 +3896,7 @@ elif role == "Accounting":
                     key=f"print_pv_{cv_no}_{idx}"
                 )
                 
-                cheque_pdf = create_cheque_pdf(supplier, total_amt - init_discount_amt, c_date)
+                cheque_pdf = create_cheque_pdf(supplier, max(0.0, total_amt - init_discount_amt - init_wht_amt), c_date)
                 col_btn2.download_button(
                     label="🎟️ Print Cheque (A4)",
                     data=cheque_pdf,
@@ -3854,9 +3904,9 @@ elif role == "Accounting":
                     mime="application/pdf",
                     key=f"print_chk_{cv_no}_{idx}"
                 )
-
+    
                 #===============================inline editor===================
-                # --- ✏️ FULL INLINE EDIT TOOL (Amount, Discount, Check No, Check Date & 2307 WHT) ---
+                # --- ✏️ FULL INLINE EDIT TOOL & DOCUMENTS SECTION ---
                 with st.expander(f"⚙️ Options / Edit Details for {cv_no}"):
                     col_e1, col_e2, col_e3 = st.columns(3)
                     
@@ -3909,6 +3959,7 @@ elif role == "Accounting":
                     wht_option = col_w1.selectbox(
                         "Withholding Tax (BIR Form 2307)",
                         options=["0% (None)", "1% (Goods - WI158)", "2% (Services - WI160)"],
+                        index=init_wht_idx,
                         key=f"edit_wht_opt_{cv_no}_{idx}"
                     )
                     
@@ -3936,13 +3987,21 @@ elif role == "Accounting":
                     if discount_amt > 0 or computed_tax_withheld > 0:
                         st.info(f"💡 **Summary:** Gross: ₱{new_voucher_amt:,.2f} | Less Discount: ₱{discount_amt:,.2f} | Less 2307 Tax: ₱{computed_tax_withheld:,.2f} | **Net Check Disbursement: ₱{net_disbursement:,.2f}**")
                     
-                    st.markdown("")
+                    st.markdown("---")
+                    st.write("📄 **Document Downloads & Actions:**")
                     
-                    # Action Buttons layout inside expander
-                    b_col1, b_col2 = st.columns([1, 1])
+                    # Document Action Buttons layout inside expander
+                    b_col1, b_col2, b_col3 = st.columns([1, 1, 1])
                     
                     with b_col1:
-                        save_clicked = st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{idx}", type="primary")
+                        st.download_button(
+                            label="📄 Payment Voucher PDF",
+                            data=voucher_pdf,
+                            file_name=f"Voucher_{cv_no}.pdf",
+                            mime="application/pdf",
+                            key=f"exp_dl_pv_{cv_no}_{idx}",
+                            use_container_width=True
+                        )
                     
                     with b_col2:
                         if computed_tax_withheld > 0:
@@ -3957,10 +4016,10 @@ elif role == "Accounting":
                                 supplier_address = supp_row[1] if (supp_row and supp_row[1]) else "N/A"
                                 
                                 # 2. Compute tax period bounds (current quarter)
-                                today = datetime.now()
-                                q_start_month = 3 * ((today.month - 1) // 3) + 1
-                                period_from = datetime(today.year, q_start_month, 1).strftime('%m/%d/%Y')
-                                period_to = today.strftime('%m/%d/%Y')
+                                today_dt = datetime.now()
+                                q_start_month = 3 * ((today_dt.month - 1) // 3) + 1
+                                period_from = datetime(today_dt.year, q_start_month, 1).strftime('%m/%d/%Y')
+                                period_to = today_dt.strftime('%m/%d/%Y')
                 
                                 # 3. Generate 2307 PDF Buffer directly
                                 pdf_buffer = generate_bir_2307_pdf(
@@ -3987,7 +4046,7 @@ elif role == "Accounting":
                 
                                 # 4. Direct 1-Click Download Button
                                 st.download_button(
-                                    label=f"📄 Download 2307 PDF ({cv_no})",
+                                    label="📄 Download BIR 2307 PDF",
                                     data=pdf_buffer,
                                     file_name=f"BIR_Form_2307_{cv_no}.pdf",
                                     mime="application/pdf",
@@ -3996,6 +4055,11 @@ elif role == "Accounting":
                                 )
                             except Exception as pdf_err:
                                 st.error(f"⚠️ Could not build BIR 2307 PDF: {pdf_err}")
+                        else:
+                            st.caption("ℹ️ Select 1% or 2% WHT above to enable BIR 2307 PDF.")
+    
+                    with b_col3:
+                        save_clicked = st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{idx}", type="primary", use_container_width=True)
                     
                     if save_clicked:
                         try:
@@ -4032,7 +4096,7 @@ elif role == "Accounting":
                             
                             if computed_tax_withheld > 0:
                                 if has_wht_entry:
-                                    c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, cv_no))
+                                    c.execute("UPDATE journal_entries SET credit = ? AND description = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, f"EWT {atc_code} withheld for {cv_no}", cv_no))
                                 else:
                                     existing_ref = c.execute("SELECT ref_no, project_name FROM journal_entries WHERE voucher_no = ? LIMIT 1", (cv_no,)).fetchone()
                                     ref_val = existing_ref[0] if existing_ref else cv_no
@@ -4091,7 +4155,7 @@ elif role == "Accounting":
                         except Exception as e:
                             st.error(f"❌ Error updating voucher details: {e}")
                 #===============================end of inline editor============
-
+    
                 st.markdown("---")
         # =============================================================
         else:
@@ -4154,6 +4218,8 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
+                  
+    #==============================================================================================
                   
    
     #==============================================================================================        
