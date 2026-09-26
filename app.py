@@ -4798,11 +4798,14 @@ elif role == "Admin View All":
                     c.execute("DELETE FROM requests")
                     c.execute("DELETE FROM floating_checks")
                     c.execute("DELETE FROM bank_reconciliations")
+                    c.execute("DELETE FROM payroll_runs")
+                    c.execute("DELETE FROM timekeeping")
+                    
                     
                     # Reset SQLite auto-increment counters back to 1
                     c.execute("""
                         DELETE FROM sqlite_sequence 
-                        WHERE name IN ('journal_entries', 'deliveries', 'inventory_ledger', 'requests', 'floating_checks', 'bank_reconciliations')
+                        WHERE name IN ('journal_entries', 'deliveries', 'inventory_ledger', 'requests', 'floating_checks', 'bank_reconciliations', 'payroll_runs', 'timekeeping')
                     """)
                     
                     conn.commit()
