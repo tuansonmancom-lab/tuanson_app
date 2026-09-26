@@ -1549,24 +1549,24 @@ from io import BytesIO
 from datetime import datetime 
 from reportlab.lib.pagesizes import letter 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, KeepTogether 
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle 
+from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle 
 from reportlab.lib import colors
 
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
     buffer = BytesIO()
     doc = SimpleDocTemplate(
-	buffer,
-	pagesize=letter,
-	rightMargin=36,
-	leftMargin=36,
-	topMargin=36,
-	bottomMargin=36
+        buffer,
+        pagesize=letter,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36
     )
     story = []
     
     styles = getSampleStyleSheet()
     
-    # --- PARAGRAPH STYLES (Roboto for ₱ sign compatibility) ---
+    # --- UPDATED PARAGRAPH STYLES ---
     style_normal = styles['Normal']
     style_normal.fontName = 'Roboto'
     style_normal.fontSize = 8
@@ -1581,68 +1581,68 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     gl_entries = []
     ewt_amount = 0.0
     ewt_rate_str = ""
-    net_check_amount = float(total_amt or 0.0)
+    net_check_amount = float(total_amt)
     cheque_no = ""
     cheque_date_str = cv_date or ""
     po_no = ""
     project_desc = ""
 
     if conn:
-	try:
-	    # Fetch ALL journal entries for this voucher (20100, 10330, 20400, etc.)
-	    gl_entries = conn.execute("""
-		SELECT voucher_no, entry_date, account_code, account_name, debit, credit, description, ref_no
-		FROM journal_entries
-		WHERE voucher_no = ?
-		ORDER BY debit DESC, credit ASC, id ASC
-	    """, (cv_no,)).fetchall()
+        try:
+            # Fetch ALL journal entries for this voucher (20100, 10330, 20400, etc.)
+            gl_entries = conn.execute("""
+                SELECT voucher_no, entry_date, account_code, account_name, debit, credit, description, ref_no
+                FROM journal_entries
+                WHERE voucher_no = ?
+                ORDER BY debit DESC, credit ASC, id ASC
+            """, (cv_no,)).fetchall()
 
-	    # Fetch Delivery / APV or Request Details
-	    del_row = conn.execute("""
-		SELECT cheque_no, cheque_date, project_name, pono 
-		FROM deliveries 
-		WHERE cv_number = ?
-	    """, (cv_no,)).fetchone()
+            # Fetch Delivery / APV or Request Details
+            del_row = conn.execute("""
+                SELECT cheque_no, cheque_date, project_name, pono 
+                FROM deliveries 
+                WHERE cv_number = ?
+            """, (cv_no,)).fetchone()
 
-	    if del_row:
-		cheque_no = del_row[0] or ""
-		cheque_date_str = del_row[1] or cv_date
-		project_desc = del_row[2] or ""
-		po_no = del_row[3] or ""
-	    else:
-		req_row = conn.execute("""
-		    SELECT cheque_no, cheque_date, project_name, pono 
-		    FROM requests 
-		    WHERE cv_number = ?
-		""", (cv_no,)).fetchone()
-		if req_row:
-		    cheque_no = req_row[0] or ""
-		    cheque_date_str = req_row[1] or cv_date
-		    project_desc = req_row[2] or ""
-		    po_no = req_row[3] or ""
-	except Exception:
-	    gl_entries = []
+            if del_row:
+                cheque_no = del_row[0] or ""
+                cheque_date_str = del_row[1] or cv_date
+                project_desc = del_row[2] or ""
+                po_no = del_row[3] or ""
+            else:
+                req_row = conn.execute("""
+                    SELECT cheque_no, cheque_date, project_name, pono 
+                    FROM requests 
+                    WHERE cv_number = ?
+                """, (cv_no,)).fetchone()
+                if req_row:
+                    cheque_no = req_row[0] or ""
+                    cheque_date_str = req_row[1] or cv_date
+                    project_desc = req_row[2] or ""
+                    po_no = req_row[3] or ""
+        except Exception:
+            gl_entries = []
 
     # Calculate EWT and Net Check Amount from GL entries
     for entry in gl_entries:
-	acct_code = str(entry[2])
-	credit_val = float(entry[5] or 0.0)
-	desc_val = str(entry[6] or "")
+        acct_code = str(entry[2])
+        credit_val = float(entry[5] or 0.0)
+        desc_val = str(entry[6] or "")
 
-	# Check for Withholding Tax account (Code 20400)
-	if acct_code == '20400' or 'Withholding' in str(entry[3]) or 'EWT' in desc_val:
-	    ewt_amount += credit_val
-	    if "WI158" in desc_val or "1%" in desc_val:
-		ewt_rate_str = "(1%)"
-	    elif "WI160" in desc_val or "2%" in desc_val:
-		ewt_rate_str = "(2%)"
-	    elif total_amt > 0:
-		pct = round((credit_val / total_amt) * 100)
-		ewt_rate_str = f"({pct}%)" if pct > 0 else ""
+        # Check for Withholding Tax account (Code 20400)
+        if acct_code == '20400' or 'Withholding' in str(entry[3]) or 'EWT' in desc_val:
+            ewt_amount += credit_val
+            if "WI158" in desc_val or "1%" in desc_val:
+                ewt_rate_str = "(1%)"
+            elif "WI160" in desc_val or "2%" in desc_val:
+                ewt_rate_str = "(2%)"
+            elif total_amt > 0:
+                pct = round((credit_val / total_amt) * 100)
+                ewt_rate_str = f"({pct}%)" if pct > 0 else ""
 
-	# Check for Cash / Bank Account (Net Check Amount)
-	elif acct_code.startswith('103') or acct_code == '10100':
-	    net_check_amount = credit_val
+        # Check for Cash / Bank Account (Net Check Amount)
+        elif acct_code.startswith('103') or acct_code == '10100':
+            net_check_amount = credit_val
 
     # Create optional EWT Note string
     ewt_note_line = f"Notes: Less {ewt_rate_str} EWT ₱{ewt_amount:,.2f}" if ewt_amount > 0 else ""
@@ -1655,164 +1655,153 @@ def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=
     story.append(Spacer(1, 10))
 
     # --- 3. VOUCHER INFO HEADER BOX ---
-    info_data = [[
-	Paragraph(f"{supplier} ", style_normal),
-	Paragraph(f"NO.: {cv_no} 
+    info_data = [[Paragraph(f"{supplier} ", style_normal),Paragraph(f"NO.: {cv_no} <br/>DATE: {cv_date} <br/>CHEQUE NO.: {cheque_no or '-'} / {cheque_date_str}", style_normal)]]
+    info_table = Table(info_data, colWidths=[360, 180])
+    info_table.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('PADDING', (0, 0), (-1, -1), 6),])
+        )
+    story.append(info_table)
+    story.append(Spacer(1, 8))
 
-DATE: {cv_date}
+    # --- 4. MAIN ACCOUNT TABLE ---
+    desc_text = f"Payment for materials / services ({apv_no or cv_no})"
+    if po_no: desc_text += f" (PO#{po_no})"
+    if project_desc: desc_text += f" for {project_desc}"
 
+    acct_summary_data = [["A/C CODE", "A/C NAME", "DESCRIPTION", "AMOUNT"],["20100", supplier, Paragraph(desc_text, style_normal), f"₱{total_amt:,.2f}"]]
+    acct_table = Table(acct_summary_data, colWidths=[70, 130, 240, 100])
+    acct_table.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Roboto'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('PADDING', (0, 0), (-1, -1), 5),
+        ]))
+    story.append(acct_table)
+    story.append(Spacer(1, 10))
 
-CHEQUE NO.: {cheque_no or '-'} / {cheque_date_str}", style_normal)
-]]
-info_table = Table(info_data, colWidths=[360, 180])
-info_table.setStyle(TableStyle([
-('BOX', (0, 0), (-1, -1), 1, colors.black),
-('VALIGN', (0, 0), (-1, -1), 'TOP'),
-('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-('PADDING', (0, 0), (-1, -1), 6),
-]))
-story.append(info_table)
-story.append(Spacer(1, 8))
+    # --- 5. DYNAMIC GENERAL LEDGER JOURNALS TABLE ---
+    story.append(Paragraph("**Journals:**", style_normal))
+    story.append(Spacer(1, 3))
 
-# --- 4. MAIN ACCOUNT TABLE ---
-desc_text = f"Payment for materials / services ({apv_no or cv_no})"
-if po_no: desc_text += f" (PO#{po_no})"
-if project_desc: desc_text += f" for {project_desc}"
+    gl_table_data = [["Doc No.", "Date", "Account #", "Account Name", "Debit", "Credit"]]
 
-acct_summary_data = [
-    ["A/C CODE", "A/C NAME", "DESCRIPTION", "AMOUNT"],
-    ["20100", supplier, Paragraph(desc_text, style_normal), f"₱{total_amt:,.2f}"]
-]
-acct_table = Table(acct_summary_data, colWidths=[70, 130, 240, 100])
-acct_table.setStyle(TableStyle([
+    tot_debit = 0.0
+    tot_credit = 0.0
+
+    if gl_entries:
+        for r in gl_entries:
+            # r: (voucher_no, entry_date, account_code, account_name, debit, credit, desc, ref_no)
+            d_val = float(r[4] or 0.0)
+            c_val = float(r[5] or 0.0)
+            tot_debit += d_val
+            tot_credit += c_val
+
+            gl_table_data.append([
+                str(r[0] or ''),
+                str(r[1] or ''),
+                str(r[2] or ''),
+                Paragraph(str(r[3] or ''), style_normal),
+                f"{d_val:,.2f}" if d_val > 0 else "",
+                f"{c_val:,.2f}" if c_val > 0 else ""
+            ])
+    else:
+        # Fallback if no GL rows passed
+        gl_table_data.append([cv_no, cv_date, "20100", supplier, f"{total_amt:,.2f}", ""])
+        gl_table_data.append([cv_no, cv_date, "10330", pay_method, "", f"{total_amt:,.2f}"])
+        tot_debit = total_amt
+        tot_credit = total_amt
+
+    # Add TOTAL Row
+    gl_table_data.append(["", "", "", "TOTAL", f"{tot_debit:,.2f}", f"{tot_credit:,.2f}"])
+
+    gl_table = Table(gl_table_data, colWidths=[65, 85, 55, 175, 80, 80])
+    gl_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
+        ('FONTNAME', (0, 1), (-1, -2), 'Roboto'),
+        ('FONTNAME', (0, -1), (-1, -1), 'Roboto-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ALIGN', (4, 0), (5, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('PADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(gl_table)
+    story.append(Spacer(1, 10))
+
+    # --- 6. BILLS / REFERENCE DOCS TABLE ---
+    bill_data = [["Type", "Doc. No.", "Doc. Date", "Description", "Orig. Amount", "Paid Amount"],
+                 ["BIL", po_no or apv_no or cv_no, cv_date, 
+                    Paragraph(project_desc or desc_text, style_normal), 
+                    f"{total_amt:,.2f}", f"{total_amt:,.2f}"
+                 ]
+                ]
+    bill_table = Table(bill_data, colWidths=[40, 90, 65, 185, 80, 80])
+    bill_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Roboto'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ALIGN', (4, 0), (5, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('PADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(bill_table)
+    story.append(Spacer(1, 12))
+
+    # --- 7. AMOUNT IN WORDS, DYNAMIC EWT NOTE & TOTALS SECTION ---
+    amount_in_words_str = amount_to_words(total_amt)
+
+    # Left cell contains AMOUNT IN WORDS and optional Notes line if EWT exists
+    left_content = [
+            Paragraph(f"**AMOUNT IN WORDS:** {amount_in_words_str}", style_normal)
+        ]
+    if ewt_note_line:
+        left_content.append(Spacer(1, 6))
+        left_content.append(Paragraph(f"{ewt_note_line}", style_bold))
+
+        summary_box_data = [
+            [
+                left_content,
+                Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} <br/>ROUNDING ADJ: 0.00 <br/>NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
+            ]
+        ]
+    summary_table = Table(summary_box_data, colWidths=[360, 180])
+    summary_table.setStyle(TableStyle([
     ('BOX', (0, 0), (-1, -1), 1, colors.black),
     ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-    ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
-    ('FONTNAME', (0, 1), (-1, -1), 'Roboto'),
-    ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
-    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ('PADDING', (0, 0), (-1, -1), 5),
-]))
-story.append(acct_table)
-story.append(Spacer(1, 10))
+    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ('PADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 40))
 
-# --- 5. DYNAMIC GENERAL LEDGER JOURNALS TABLE ---
-story.append(Paragraph("**Journals:**", style_normal))
-story.append(Spacer(1, 3))
-
-gl_table_data = [["Doc No.", "Date", "Account #", "Account Name", "Debit", "Credit"]]
-
-tot_debit = 0.0
-tot_credit = 0.0
-
-if gl_entries:
-    for r in gl_entries:
-	d_val = float(r[4] or 0.0)
-	c_val = float(r[5] or 0.0)
-	tot_debit += d_val
-	tot_credit += c_val
-
-	gl_table_data.append([
-	    str(r[0] or ''),
-	    str(r[1] or ''),
-	    str(r[2] or ''),
-	    Paragraph(str(r[3] or ''), style_normal),
-	    f"{d_val:,.2f}" if d_val > 0 else "",
-	    f"{c_val:,.2f}" if c_val > 0 else ""
-	])
-else:
-    gl_table_data.append([cv_no, cv_date, "20100", supplier, f"{total_amt:,.2f}", ""])
-    gl_table_data.append([cv_no, cv_date, "10330", pay_method, "", f"{total_amt:,.2f}"])
-    tot_debit = total_amt
-    tot_credit = total_amt
-
-# Add TOTAL Row
-gl_table_data.append(["", "", "", "TOTAL", f"{tot_debit:,.2f}", f"{tot_credit:,.2f}"])
-
-gl_table = Table(gl_table_data, colWidths=[65, 85, 55, 175, 80, 80])
-gl_table.setStyle(TableStyle([
-    ('BOX', (0, 0), (-1, -1), 1, colors.black),
-    ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-    ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
-    ('FONTNAME', (0, 1), (-1, -2), 'Roboto'),
-    ('FONTNAME', (0, -1), (-1, -1), 'Roboto-Bold'),
-    ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ('ALIGN', (4, 0), (5, -1), 'RIGHT'),
-    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ('PADDING', (0, 0), (-1, -1), 4),
-]))
-story.append(gl_table)
-story.append(Spacer(1, 10))
-
-# --- 6. BILLS / REFERENCE DOCS TABLE ---
-bill_data = [
-    ["Type", "Doc. No.", "Doc. Date", "Description", "Orig. Amount", "Paid Amount"],
-    [
-	"BIL", po_no or apv_no or cv_no, cv_date, 
-	Paragraph(project_desc or desc_text, style_normal), 
-	f"{total_amt:,.2f}", f"{total_amt:,.2f}"
+    # --- 8. SIGNATURE SECTION ---
+    sig_data = [
+        ["___________________________________", "___________________________________"],
+        ["APPROVED BY", "RECEIVED BY"]
     ]
-]
-bill_table = Table(bill_data, colWidths=[40, 90, 65, 185, 80, 80])
-bill_table.setStyle(TableStyle([
-    ('BOX', (0, 0), (-1, -1), 1, colors.black),
-    ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-    ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
-    ('FONTNAME', (0, 1), (-1, -1), 'Roboto'),
-    ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ('ALIGN', (4, 0), (5, -1), 'RIGHT'),
-    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ('PADDING', (0, 0), (-1, -1), 4),
-]))
-story.append(bill_table)
-story.append(Spacer(1, 12))
+    sig_table = Table(sig_data, colWidths=[270, 270])
+    sig_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Roboto'),
+        ('FONTNAME', (0, 1), (-1, 1), 'Roboto-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('PADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(sig_table)
 
-# --- 7. AMOUNT IN WORDS, DYNAMIC EWT NOTE & TOTALS SECTION ---
-amount_in_words_str = amount_to_words(total_amt)
-
-# Left cell contains AMOUNT IN WORDS and optional Notes line if EWT exists
-left_content = [Paragraph(f"AMOUNT IN WORDS:{amount_in_words_str}", style_normal)]
-if ewt_note_line:
-    left_content.append(Spacer(1, 6))
-    left_content.append(Paragraph(f"{ewt_note_line}", style_bold))
-
-# summary_box_data is now properly un-indented outside the if statement:
-summary_box_data = [
-    		[
-			left_content,
-			  Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} <br/>ROUNDING ADJ: 0.00 <br/>NET TOTAL PHP: ₱{total_amt:,.2f}", 
-			  ParagraphStyle('RText', parent=style_normal, alignment=2))
-			]
-		]
-summary_table = Table(summary_box_data, colWidths=[360, 180])
-summary_table.setStyle(TableStyle([
-('BOX', (0, 0), (-1, -1), 1, colors.black),
-('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-('VALIGN', (0, 0), (-1, -1), 'TOP'),
-('PADDING', (0, 0), (-1, -1), 6),
-]))
-story.append(summary_table)
-story.append(Spacer(1, 40))
-
-# --- 8. SIGNATURE SECTION ---
-sig_data = [
-    ["___________________________________", "___________________________________"],
-    ["APPROVED BY", "RECEIVED BY"]
-]
-sig_table = Table(sig_data, colWidths=[270, 270])
-sig_table.setStyle(TableStyle([
-    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-    ('FONTNAME', (0, 0), (-1, 0), 'Roboto'),
-    ('FONTNAME', (0, 1), (-1, 1), 'Roboto-Bold'),
-    ('FONTSIZE', (0, 0), (-1, -1), 8),
-    ('PADDING', (0, 0), (-1, -1), 2),
-]))
-story.append(sig_table)
-
-doc.build(story)
-buffer.seek(0)
-return buffer.getvalue()
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 
