@@ -1544,259 +1544,207 @@ def create_apv_pdf(apv_no, apv_date, dr_number, po_number, supplier, project, to
     return buffer.getvalue()
 
 # --- CV PDF GENERATOR FUNCTION ---
-from io import BytesIO 
-from datetime import datetime 
-from reportlab.lib.pagesizes import letter 
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, KeepTogether 
-from reportlab.lib.styles import getSampleStyleSheet,ParagraphStyle 
-from reportlab.lib import colors
-
 def create_cv_pdf(cv_no, cv_date, apv_no, supplier, pay_method, total_amt, conn=None):
+    import os
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from io import BytesIO
+
+    # 1. REGISTER ROBOTO FONT FOR NATIVE ₱ RENDERING
+    pdf_font = "Helvetica"
+    font_candidates = ["Roboto-Regular.ttf", "roboto.ttf", "Roboto.ttf"]
+    for font_path in font_candidates:
+        if os.path.exists(font_path):
+            try:
+                pdfmetrics.registerFont(TTFont("Roboto", font_path))
+                pdf_font = "Roboto"
+                break
+            except Exception:
+                pass
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(
-        buffer,
+        buffer, 
         pagesize=letter,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
+        rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36
     )
     story = []
-    
     styles = getSampleStyleSheet()
-    
-    # --- UPDATED PARAGRAPH STYLES ---
-    style_normal = styles['Normal']
-    style_normal.fontName = 'Roboto'
-    style_normal.fontSize = 8
-    style_normal.leading = 10
-    
-    style_bold = ParagraphStyle('BoldText', parent=style_normal, fontName='Roboto-Bold')
-    style_title = ParagraphStyle('DocTitle', parent=style_normal, fontName='Roboto-Bold', fontSize=14, leading=16, alignment=1)
-    style_header = ParagraphStyle('CompHeader', parent=style_normal, fontName='Roboto-Bold', fontSize=12, leading=14, alignment=1)
-    style_subhead = ParagraphStyle('CompSub', parent=style_normal, fontName='Roboto', fontSize=8, leading=10, alignment=1)
 
-    # --- 1. FETCH ALL JOURNAL ENTRIES & CHEQUE DETAILS FROM DATABASE ---
-    gl_entries = []
-    ewt_amount = 0.0
-    ewt_rate_str = ""
-    net_check_amount = float(total_amt)
-    cheque_no = ""
-    cheque_date_str = cv_date or ""
-    po_no = ""
-    project_desc = ""
+    # Fetch Supplier Location
+    sup_location = "Cebu, Philippines"
+    if conn:
+        try:
+            c = conn.cursor()
+            row = c.execute("SELECT location FROM suppliers WHERE supplier_name = ?", (supplier,)).fetchone()
+            if row and row[0]:
+                sup_location = row[0]
+        except Exception:
+            pass
+
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName=pdf_font, fontSize=16, leading=20, alignment=1)
+    sub_title_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontName=pdf_font, fontSize=9, leading=12, alignment=1)
+    body_norm = ParagraphStyle('BodyNorm', parent=styles['Normal'], fontName=pdf_font, fontSize=8, leading=10)
+
+    story.append(Paragraph("<b>Tuanson Construction</b>", title_style))
+    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, Cebu", sub_title_style))
+    story.append(Paragraph("Tel: - Fax: -", sub_title_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("<b>Payment Voucher</b>", title_style))
+    story.append(Spacer(1, 10))
+
+    cheque_no_str = "-"
+    cheque_date_str = "-"
+    po_no_str = "-"
+    project_str = "-"
 
     if conn:
         try:
-            # Fetch ALL journal entries for this voucher (20100, 10330, 20400, etc.)
-            gl_entries = conn.execute("""
-                SELECT voucher_no, entry_date, account_code, account_name, debit, credit, description, ref_no
-                FROM journal_entries
-                WHERE voucher_no = ?
-                ORDER BY debit DESC, credit ASC, id ASC
-            """, (cv_no,)).fetchall()
-
-            # Fetch Delivery / APV or Request Details
-            del_row = conn.execute("""
-                SELECT cheque_no, cheque_date, project_name, pono 
-                FROM deliveries 
-                WHERE cv_number = ?
-            """, (cv_no,)).fetchone()
-
-            if del_row:
-                cheque_no = del_row[0] or ""
-                cheque_date_str = del_row[1] or cv_date
-                project_desc = del_row[2] or ""
-                po_no = del_row[3] or ""
+            c = conn.cursor()
+            # If standard APV payment
+            if apv_no and apv_no.strip():
+                del_row = c.execute("""
+                    SELECT cheque_no, cheque_date, pono, project_name 
+                    FROM deliveries WHERE apv_number = ? AND supplier = ?
+                """, (apv_no, supplier)).fetchone()
+                if del_row:
+                    cheque_no_str = del_row[0] or "-"
+                    cheque_date_str = del_row[1] or "-"
+                    po_no_str = del_row[2] or "-"
+                    project_str = del_row[3] or "-"
+            # If Advance PDC (PO Basis)
             else:
-                req_row = conn.execute("""
-                    SELECT cheque_no, cheque_date, project_name, pono 
-                    FROM requests 
-                    WHERE cv_number = ?
-                """, (cv_no,)).fetchone()
+                req_row = c.execute("""
+                    SELECT cheque_no, cheque_date, pono, project_name 
+                    FROM requests WHERE cv_number = ? AND supplier = ?
+                """, (cv_no, supplier)).fetchone()
                 if req_row:
-                    cheque_no = req_row[0] or ""
-                    cheque_date_str = req_row[1] or cv_date
-                    project_desc = req_row[2] or ""
-                    po_no = req_row[3] or ""
+                    cheque_no_str = req_row[0] or "-"
+                    cheque_date_str = req_row[1] or "-"
+                    po_no_str = req_row[2] or "-"
+                    project_str = req_row[3] or "-"
         except Exception:
-            gl_entries = []
+            pass
 
-    # Calculate EWT and Net Check Amount from GL entries
-    for entry in gl_entries:
-        acct_code = str(entry[2])
-        credit_val = float(entry[5] or 0.0)
-        desc_val = str(entry[6] or "")
+    supplier_box_html = f"<b>{supplier}</b><br/>{sup_location}"
+    meta_box_html = f"<b>NO.:</b> {cv_no}<br/><b>DATE:</b> {cv_date}<br/><b>CHEQUE NO.:</b> {cheque_no_str} / {cheque_date_str}"
 
-        # Check for Withholding Tax account (Code 20400)
-        if acct_code == '20400' or 'Withholding' in str(entry[3]) or 'EWT' in desc_val:
-            ewt_amount += credit_val
-            if "WI158" in desc_val or "1%" in desc_val:
-                ewt_rate_str = "(1%)"
-            elif "WI160" in desc_val or "2%" in desc_val:
-                ewt_rate_str = "(2%)"
-            elif total_amt > 0:
-                pct = round((credit_val / total_amt) * 100)
-                ewt_rate_str = f"({pct}%)" if pct > 0 else ""
-
-        # Check for Cash / Bank Account (Net Check Amount)
-        elif acct_code.startswith('103') or acct_code == '10100':
-            net_check_amount = credit_val
-
-    # Create optional EWT Note string
-    ewt_note_line = f"Notes: Less {ewt_rate_str} EWT ₱{ewt_amount:,.2f}" if ewt_amount > 0 else ""
-
-    # --- 2. COMPANY HEADER ---
-    story.append(Paragraph("Tuanson Construction", style_header))
-    story.append(Paragraph("162 P. Labuca St., Cansojong, Talisay City, CebuTel: - Fax: -", style_subhead))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("Payment Voucher", style_title))
+    header_table_data = [[Paragraph(supplier_box_html, body_norm), Paragraph(meta_box_html, body_norm)]]
+    t_header = Table(header_table_data, colWidths=[340, 200])
+    t_header.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('INNERGRID', (0,0), (-1,-1), 1, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
+        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+    ]))
+    story.append(t_header)
     story.append(Spacer(1, 10))
 
-    # --- 3. VOUCHER INFO HEADER BOX ---
-    info_data = [[Paragraph(f"{supplier} ", style_normal),Paragraph(f"NO.: {cv_no} <br/>DATE: {cv_date} <br/>CHEQUE NO.: {cheque_no or '-'} / {cheque_date_str}", style_normal)]]
-    info_table = Table(info_data, colWidths=[360, 180])
-    info_table.setStyle(TableStyle([
-            ('BOX', (0, 0), (-1, -1), 1, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('PADDING', (0, 0), (-1, -1), 6),])
-        )
-    story.append(info_table)
-    story.append(Spacer(1, 8))
+    apv_ref = f"APV#{apv_no}" if apv_no else "Advance Downpayment"
+    po_ref = f"(PO#{po_no_str})" if po_no_str != "-" else ""
+    desc_text = f"Payment for materials / services ({apv_ref}) {po_ref} for {project_str}".strip()
 
-    # --- 4. MAIN ACCOUNT TABLE ---
-    desc_text = f"Payment for materials / services ({apv_no or cv_no})"
-    if po_no: desc_text += f" (PO#{po_no})"
-    if project_desc: desc_text += f" for {project_desc}"
+    acct_code = "20100" if apv_no else "10500"
+    acct_name = supplier if apv_no else f"Advances to Suppliers - {supplier}"
 
-    acct_summary_data = [["A/C CODE", "A/C NAME", "DESCRIPTION", "AMOUNT"],["20100", supplier, Paragraph(desc_text, style_normal), f"₱{total_amt:,.2f}"]]
-    acct_table = Table(acct_summary_data, colWidths=[70, 130, 240, 100])
-    acct_table.setStyle(TableStyle([
-            ('BOX', (0, 0), (-1, -1), 1, colors.black),
-            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
-            ('FONTNAME', (0, 1), (-1, -1), 'Roboto'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('PADDING', (0, 0), (-1, -1), 5),
-        ]))
-    story.append(acct_table)
+    part_data = [
+        [Paragraph("<b>A/C CODE</b>", body_norm), Paragraph("<b>A/C NAME</b>", body_norm), Paragraph("<b>DESCRIPTION</b>", body_norm), Paragraph("<b>AMOUNT</b>", body_norm)],
+        [Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(desc_text, body_norm), Paragraph(f"₱{total_amt:,.2f}", body_norm)]
+    ]
+    t_part = Table(part_data, colWidths=[70, 150, 230, 90])
+    t_part.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (3,0), (3,-1), 'RIGHT'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+    ]))
+    story.append(t_part)
     story.append(Spacer(1, 10))
 
-    # --- 5. DYNAMIC GENERAL LEDGER JOURNALS TABLE ---
-    story.append(Paragraph("**Journals:**", style_normal))
+    story.append(Paragraph("<b>Journals:</b>", body_norm))
     story.append(Spacer(1, 3))
-
-    gl_table_data = [["Doc No.", "Date", "Account #", "Account Name", "Debit", "Credit"]]
-
-    tot_debit = 0.0
-    tot_credit = 0.0
-
-    if gl_entries:
-        for r in gl_entries:
-            # r: (voucher_no, entry_date, account_code, account_name, debit, credit, desc, ref_no)
-            d_val = float(r[4] or 0.0)
-            c_val = float(r[5] or 0.0)
-            tot_debit += d_val
-            tot_credit += c_val
-
-            gl_table_data.append([
-                str(r[0] or ''),
-                str(r[1] or ''),
-                str(r[2] or ''),
-                Paragraph(str(r[3] or ''), style_normal),
-                f"{d_val:,.2f}" if d_val > 0 else "",
-                f"{c_val:,.2f}" if c_val > 0 else ""
-            ])
-    else:
-        # Fallback if no GL rows passed
-        gl_table_data.append([cv_no, cv_date, "20100", supplier, f"{total_amt:,.2f}", ""])
-        gl_table_data.append([cv_no, cv_date, "10330", pay_method, "", f"{total_amt:,.2f}"])
-        tot_debit = total_amt
-        tot_credit = total_amt
-
-    # Add TOTAL Row
-    gl_table_data.append(["", "", "", "TOTAL", f"{tot_debit:,.2f}", f"{tot_credit:,.2f}"])
-
-    gl_table = Table(gl_table_data, colWidths=[65, 85, 55, 175, 80, 80])
-    gl_table.setStyle(TableStyle([
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
-        ('FONTNAME', (0, 1), (-1, -2), 'Roboto'),
-        ('FONTNAME', (0, -1), (-1, -1), 'Roboto-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('ALIGN', (4, 0), (5, -1), 'RIGHT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('PADDING', (0, 0), (-1, -1), 4),
+    
+    # Cleaned duplicate account code "10330:" from "Cash in Bank BDO"
+    j_data = [
+        [Paragraph("<b>Doc No.</b>", body_norm), Paragraph("<b>Date</b>", body_norm), Paragraph("<b>Account #</b>", body_norm), Paragraph("<b>Account Name</b>", body_norm), Paragraph("<b>Debit</b>", body_norm), Paragraph("<b>Credit</b>", body_norm)],
+        [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph(acct_code, body_norm), Paragraph(acct_name, body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph("", body_norm)],
+        [Paragraph(cv_no, body_norm), Paragraph(cv_date, body_norm), Paragraph("10330", body_norm), Paragraph("Cash in Bank BDO", body_norm), Paragraph("", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm)],
+        [Paragraph("", body_norm), Paragraph("", body_norm), Paragraph("", body_norm), Paragraph("<b>TOTAL</b>", body_norm), Paragraph(f"<b>{total_amt:,.2f}</b>", body_norm), Paragraph(f"<b>{total_amt:,.2f}</b>", body_norm)]
+    ]
+    t_j = Table(j_data, colWidths=[65, 65, 65, 185, 80, 80])
+    t_j.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (4,0), (5,-1), 'RIGHT'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
-    story.append(gl_table)
+    story.append(t_j)
     story.append(Spacer(1, 10))
 
-    # --- 6. BILLS / REFERENCE DOCS TABLE ---
-    bill_data = [["Type", "Doc. No.", "Doc. Date", "Description", "Orig. Amount", "Paid Amount"],
-                 ["BIL", po_no or apv_no or cv_no, cv_date, 
-                    Paragraph(project_desc or desc_text, style_normal), 
-                    f"{total_amt:,.2f}", f"{total_amt:,.2f}"
-                 ]
-                ]
-    bill_table = Table(bill_data, colWidths=[40, 90, 65, 185, 80, 80])
-    bill_table.setStyle(TableStyle([
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('FONTNAME', (0, 0), (-1, 0), 'Roboto-Bold'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Roboto'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('ALIGN', (4, 0), (5, -1), 'RIGHT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('PADDING', (0, 0), (-1, -1), 4),
+    doc_data = [
+        [Paragraph("<b>Type</b>", body_norm), Paragraph("<b>Doc. No.</b>", body_norm), Paragraph("<b>Doc. Date</b>", body_norm), Paragraph("<b>Description</b>", body_norm), Paragraph("<b>Orig. Amount</b>", body_norm), Paragraph("<b>Paid Amount</b>", body_norm)],
+        [Paragraph("BIL", body_norm), Paragraph(f"PO#{po_no_str}", body_norm), Paragraph(cv_date, body_norm), Paragraph(f"PAYABLE FOR MATERIALS FOR \"{project_str.upper()}\"", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm), Paragraph(f"{total_amt:,.2f}", body_norm)]
+    ]
+    t_doc = Table(doc_data, colWidths=[40, 75, 65, 200, 80, 80])
+    t_doc.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('ALIGN', (4,0), (5,-1), 'RIGHT'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
-    story.append(bill_table)
-    story.append(Spacer(1, 12))
+    story.append(t_doc)
+    story.append(Spacer(1, 10))
 
-    # --- 7. AMOUNT IN WORDS, DYNAMIC EWT NOTE & TOTALS SECTION ---
-    amount_in_words_str = amount_to_words(total_amt)
+    # 2. CONVERT NUMBER TO WORDS USING YOUR HELPER FUNCTION
+    try:
+        amt_words = amount_to_words(total_amt)
+    except Exception:
+        amt_words = f"PHILIPPINE PESO {total_amt:,.2f}"
 
-    # Left cell contains AMOUNT IN WORDS and optional Notes line if EWT exists
-    left_content = [
-            Paragraph(f"**AMOUNT IN WORDS:** {amount_in_words_str}", style_normal)
-        ]
-    if ewt_note_line:
-        left_content.append(Spacer(1, 6))
-        left_content.append(Paragraph(f"{ewt_note_line}", style_bold))
+    r_align_style = ParagraphStyle('RAlign', parent=body_norm, alignment=2)
 
-        summary_box_data = [
-            [
-                left_content,
-                Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} <br/>ROUNDING ADJ: 0.00 <br/>NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
-            ]
-        ]
-    summary_table = Table(summary_box_data, colWidths=[360, 180])
-    summary_table.setStyle(TableStyle([
-    ('BOX', (0, 0), (-1, -1), 1, colors.black),
-    ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-    ('PADDING', (0, 0), (-1, -1), 6),
+    words_data = [
+        [Paragraph(f"<b>AMOUNT IN WORDS:</b><br/>{amt_words.upper()}", body_norm), 
+         Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f}<br/>ROUNDING ADJ: 0.00<br/><b>NET TOTAL PHP: ₱{total_amt:,.2f}</b>", r_align_style)]
+    ]
+    t_words = Table(words_data, colWidths=[360, 180])
+    t_words.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('BOX', (0,0), (-1,-1), 1, colors.black),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
     ]))
-    story.append(summary_table)
+    story.append(t_words)
     story.append(Spacer(1, 40))
 
-    # --- 8. SIGNATURE SECTION ---
     sig_data = [
-        ["___________________________________", "___________________________________"],
-        ["APPROVED BY", "RECEIVED BY"]
+        [Paragraph("____________________________________<br/><b>APPROVED BY</b>", ParagraphStyle('C1', parent=body_norm, alignment=1)),
+         Paragraph("____________________________________<br/><b>RECEIVED BY</b>", ParagraphStyle('C2', parent=body_norm, alignment=1))]
     ]
-    sig_table = Table(sig_data, colWidths=[270, 270])
-    sig_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Roboto'),
-        ('FONTNAME', (0, 1), (-1, 1), 'Roboto-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('PADDING', (0, 0), (-1, -1), 2),
+    t_sig = Table(sig_data, colWidths=[270, 270])
+    t_sig.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), pdf_font),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
-    story.append(sig_table)
+    story.append(t_sig)
 
     doc.build(story)
     buffer.seek(0)
@@ -3437,8 +3385,6 @@ elif role == "Accounting":
 
     # ==========================================================================================
     # --- TAB 2: CHECK VOUCHER / PAYMENT (CV, PCV & FLOATING CHECKS) ---
-    # ==========================================================================================
-    # --- TAB 2: CHECK VOUCHER / PAYMENT (CV, PCV & FLOATING CHECKS) ---
     #===============================================================
     # --- AUTOMATIC SETTLEMENT OF APVs WITH ADVANCE PDCs ---
     try:
@@ -3592,6 +3538,7 @@ elif role == "Accounting":
                 st.info("No pending APVs available for payment.")
     
         elif pay_basis == "Advance PDC / Downpayment (PO Basis)":
+            # --- FILTERED: Only fetch POs for suppliers flagged with requires_advance_pdc = 'Yes' ---
             unpaid_pos = c.execute("""
                 SELECT r.pono, r.supplier, SUM(r.amount) AS total_amount, r.project_name 
                 FROM requests r
@@ -3686,42 +3633,14 @@ elif role == "Accounting":
                 )
                 is_floating_check = st.checkbox("🎟️ Print Blank Date on Cheque (Open Date / Floating Check)", value=False)
     
-            # --- BIR FORM 2307 WITHHOLDING TAX OPTIONS (Added to Payment Processing Form) ---
-            col_w1, col_w2 = st.columns(2)
-            wht_option = col_w1.selectbox(
-                "Withholding Tax (BIR Form 2307)",
-                options=["0% (None)", "1% (Goods - WI158)", "2% (Services - WI160)"],
-                key=f"proc_wht_{pay_basis.replace(' ', '_')}"
-            )
-    
-            if "1%" in wht_option:
-                wht_rate = 0.01
-                atc_code = "WI158"
-                income_type = "PURCHASE OF GOODS"
-            elif "2%" in wht_option:
-                wht_rate = 0.02
-                atc_code = "WI160"
-                income_type = "PURCHASE OF SERVICES"
-            else:
-                wht_rate = 0.0
-                atc_code = ""
-                income_type = ""
-    
-            computed_tax_withheld = round(total_amt * wht_rate, 2)
-            net_disbursement = max(0.0, round(total_amt - computed_tax_withheld, 2))
-    
-            col_w2.metric("Computed Tax Withheld (2307)", f"₱{computed_tax_withheld:,.2f}")
-    
-            # Preview GL Account Routing based on Floating Check & 2307 Withholding status
+            # Preview GL Account Routing based on Floating Check status
             credit_preview_code = "20200" if (is_floating_check and pay_method == "Check") else selected_bank_code
             credit_preview_name = "Checks Payable / PDC Issued" if (is_floating_check and pay_method == "Check") else selected_bank_name
-    
-            wht_preview_str = f"\n* **Credit:** Withholding Tax Payable - Expanded (Code 20400) — ₱{computed_tax_withheld:,.2f}" if computed_tax_withheld > 0 else ""
     
             st.info(f"""
             💡 **Accounting Entry Preview:**
             * **Debit:** {debit_acct_name} (Code {debit_acct_code}) — ₱{total_amt:,.2f}
-            * **Credit:** {credit_preview_name} (Code {credit_preview_code}) — ₱{net_disbursement:,.2f}{wht_preview_str}
+            * **Credit:** {credit_preview_name} (Code {credit_preview_code}) — ₱{total_amt:,.2f}
             """)
     
             if st.button("✅ Process Payment & Issue Voucher", type="primary"):
@@ -3763,32 +3682,23 @@ elif role == "Accounting":
                         """, (cv_input.strip(), current_time, pay_method, cheque_no_input.strip(), c_date_str, po_val))
     
                     # Insert General Ledger Entries
-                    # 1. Debit Account (Gross Amount)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?)
                     """, (current_time, cv_input.strip(), debit_acct_code, debit_acct_name, total_amt, ref_doc, cv_debit_desc, project_name))
     
-                    # 2. Credit Bank / Cash Account (Net Disbursement Amount)
                     c.execute("""
                         INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
                         VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, ?)
-                    """, (current_time, cv_input.strip(), credit_preview_code, credit_preview_name, net_disbursement, ref_doc, cv_credit_desc, project_name))
-    
-                    # 3. Credit Withholding Tax Payable (Code 20400) if 2307 is applied
-                    if computed_tax_withheld > 0:
-                        c.execute("""
-                            INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                            VALUES (?, ?, '20400', 'Withholding Tax Payable - Expanded', 0.0, ?, ?, ?, ?)
-                        """, (current_time, cv_input.strip(), computed_tax_withheld, ref_doc, f"EWT {atc_code} withheld for {cv_input.strip()}", project_name))
+                    """, (current_time, cv_input.strip(), credit_preview_code, credit_preview_name, total_amt, ref_doc, cv_credit_desc, project_name))
     
                     # If Open-Dated Floating Check, insert record into Turso floating_checks table
                     if is_floating_check and pay_method == "Check":
                         c.execute("""
                             INSERT INTO floating_checks 
-                            (voucher_no, supplier_name, check_no, gross_amount, wht_rate, wht_atc, wht_amount, amount, voucher_date, check_date, status, bank_account_code, project_name, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Floating', ?, ?, ?)
-                        """, (cv_input.strip(), supplier_name, cheque_no_input.strip(), total_amt, wht_rate, atc_code, computed_tax_withheld, net_disbursement, current_time, c_date_str, selected_bank_code, project_name, current_time))
+                            (voucher_no, supplier_name, check_no, amount, voucher_date, check_date, status, bank_account_code, project_name, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, 'Floating', ?, ?, ?)
+                        """, (cv_input.strip(), supplier_name, cheque_no_input.strip(), total_amt, current_time, c_date_str, selected_bank_code, project_name, current_time))
     
                     conn.commit()
                     st.success(f"🎉 Voucher {cv_input.strip()} recorded successfully!")
@@ -3922,19 +3832,7 @@ elif role == "Accounting":
                 # Fetch existing purchase discount for this voucher if previously saved
                 existing_disc_row = c.execute("SELECT credit FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,)).fetchone()
                 init_discount_amt = float(existing_disc_row[0]) if existing_disc_row and existing_disc_row[0] else 0.0
-    
-                # Fetch existing WHT rate/amount for this voucher if available
-                existing_wht_row = c.execute("SELECT credit, description FROM journal_entries WHERE voucher_no = ? AND account_code = '20400'", (cv_no,)).fetchone()
-                init_wht_amt = float(existing_wht_row[0]) if existing_wht_row and existing_wht_row[0] else 0.0
-                
-                wht_desc = str(existing_wht_row[1]) if existing_wht_row and existing_wht_row[1] else ""
-                if "WI158" in wht_desc:
-                    init_wht_idx = 1
-                elif "WI160" in wht_desc:
-                    init_wht_idx = 2
-                else:
-                    init_wht_idx = 0
-    
+
                 st.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier/Payee:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
                 
                 col_btn1, col_btn2 = st.columns(2)
@@ -3948,7 +3846,7 @@ elif role == "Accounting":
                     key=f"print_pv_{cv_no}_{idx}"
                 )
                 
-                cheque_pdf = create_cheque_pdf(supplier, max(0.0, total_amt - init_discount_amt - init_wht_amt), c_date)
+                cheque_pdf = create_cheque_pdf(supplier, total_amt - init_discount_amt, c_date)
                 col_btn2.download_button(
                     label="🎟️ Print Cheque (A4)",
                     data=cheque_pdf,
@@ -3956,9 +3854,9 @@ elif role == "Accounting":
                     mime="application/pdf",
                     key=f"print_chk_{cv_no}_{idx}"
                 )
-    
+
                 #===============================inline editor===================
-                # --- ✏️ FULL INLINE EDIT TOOL & DOCUMENTS SECTION ---
+                # --- ✏️ FULL INLINE EDIT TOOL (Amount, Discount, Check No, Check Date & 2307 WHT) ---
                 with st.expander(f"⚙️ Options / Edit Details for {cv_no}"):
                     col_e1, col_e2, col_e3 = st.columns(3)
                     
@@ -4011,7 +3909,6 @@ elif role == "Accounting":
                     wht_option = col_w1.selectbox(
                         "Withholding Tax (BIR Form 2307)",
                         options=["0% (None)", "1% (Goods - WI158)", "2% (Services - WI160)"],
-                        index=init_wht_idx,
                         key=f"edit_wht_opt_{cv_no}_{idx}"
                     )
                     
@@ -4039,21 +3936,13 @@ elif role == "Accounting":
                     if discount_amt > 0 or computed_tax_withheld > 0:
                         st.info(f"💡 **Summary:** Gross: ₱{new_voucher_amt:,.2f} | Less Discount: ₱{discount_amt:,.2f} | Less 2307 Tax: ₱{computed_tax_withheld:,.2f} | **Net Check Disbursement: ₱{net_disbursement:,.2f}**")
                     
-                    st.markdown("---")
-                    st.write("📄 **Document Downloads & Actions:**")
+                    st.markdown("")
                     
-                    # Document Action Buttons layout inside expander
-                    b_col1, b_col2, b_col3 = st.columns([1, 1, 1])
+                    # Action Buttons layout inside expander
+                    b_col1, b_col2 = st.columns([1, 1])
                     
                     with b_col1:
-                        st.download_button(
-                            label="📄 Payment Voucher PDF",
-                            data=voucher_pdf,
-                            file_name=f"Voucher_{cv_no}.pdf",
-                            mime="application/pdf",
-                            key=f"exp_dl_pv_{cv_no}_{idx}",
-                            use_container_width=True
-                        )
+                        save_clicked = st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{idx}", type="primary")
                     
                     with b_col2:
                         if computed_tax_withheld > 0:
@@ -4068,10 +3957,10 @@ elif role == "Accounting":
                                 supplier_address = supp_row[1] if (supp_row and supp_row[1]) else "N/A"
                                 
                                 # 2. Compute tax period bounds (current quarter)
-                                today_dt = datetime.now()
-                                q_start_month = 3 * ((today_dt.month - 1) // 3) + 1
-                                period_from = datetime(today_dt.year, q_start_month, 1).strftime('%m/%d/%Y')
-                                period_to = today_dt.strftime('%m/%d/%Y')
+                                today = datetime.now()
+                                q_start_month = 3 * ((today.month - 1) // 3) + 1
+                                period_from = datetime(today.year, q_start_month, 1).strftime('%m/%d/%Y')
+                                period_to = today.strftime('%m/%d/%Y')
                 
                                 # 3. Generate 2307 PDF Buffer directly
                                 pdf_buffer = generate_bir_2307_pdf(
@@ -4098,7 +3987,7 @@ elif role == "Accounting":
                 
                                 # 4. Direct 1-Click Download Button
                                 st.download_button(
-                                    label="📄 Download BIR 2307 PDF",
+                                    label=f"📄 Download 2307 PDF ({cv_no})",
                                     data=pdf_buffer,
                                     file_name=f"BIR_Form_2307_{cv_no}.pdf",
                                     mime="application/pdf",
@@ -4107,11 +3996,6 @@ elif role == "Accounting":
                                 )
                             except Exception as pdf_err:
                                 st.error(f"⚠️ Could not build BIR 2307 PDF: {pdf_err}")
-                        else:
-                            st.caption("ℹ️ Select 1% or 2% WHT above to enable BIR 2307 PDF.")
-    
-                    with b_col3:
-                        save_clicked = st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{idx}", type="primary", use_container_width=True)
                     
                     if save_clicked:
                         try:
@@ -4148,7 +4032,7 @@ elif role == "Accounting":
                             
                             if computed_tax_withheld > 0:
                                 if has_wht_entry:
-                                    c.execute("UPDATE journal_entries SET credit = ? AND description = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, f"EWT {atc_code} withheld for {cv_no}", cv_no))
+                                    c.execute("UPDATE journal_entries SET credit = ? WHERE voucher_no = ? AND account_code = '20400'", (computed_tax_withheld, cv_no))
                                 else:
                                     existing_ref = c.execute("SELECT ref_no, project_name FROM journal_entries WHERE voucher_no = ? LIMIT 1", (cv_no,)).fetchone()
                                     ref_val = existing_ref[0] if existing_ref else cv_no
@@ -4207,7 +4091,7 @@ elif role == "Accounting":
                         except Exception as e:
                             st.error(f"❌ Error updating voucher details: {e}")
                 #===============================end of inline editor============
-    
+
                 st.markdown("---")
         # =============================================================
         else:
@@ -4270,8 +4154,6 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
-                  
-    #==============================================================================================
                   
    
     #==============================================================================================        
