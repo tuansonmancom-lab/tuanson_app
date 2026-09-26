@@ -1772,25 +1772,19 @@ story.append(Spacer(1, 12))
 amount_in_words_str = amount_to_words(total_amt)
 
 # Left cell contains AMOUNT IN WORDS and optional Notes line if EWT exists
-left_content = [
-    Paragraph(f"**AMOUNT IN WORDS:** {amount_in_words_str}", style_normal)
-	]
+left_content = [Paragraph(f"AMOUNT IN WORDS:{amount_in_words_str}", style_normal)]
 if ewt_note_line:
     left_content.append(Spacer(1, 6))
     left_content.append(Paragraph(f"{ewt_note_line}", style_bold))
 
 # summary_box_data is now properly un-indented outside the if statement:
 summary_box_data = [
-    [
-	left_content,
-	Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} 
-
-ROUNDING ADJ: 0.00
-
-
-NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
-]
-]
+    		[
+			left_content,
+			  Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} <br/>ROUNDING ADJ: 0.00 <br/>NET TOTAL PHP: ₱{total_amt:,.2f}", 
+			  ParagraphStyle('RText', parent=style_normal, alignment=2))
+			]
+		]
 summary_table = Table(summary_box_data, colWidths=[360, 180])
 summary_table.setStyle(TableStyle([
 ('BOX', (0, 0), (-1, -1), 1, colors.black),
