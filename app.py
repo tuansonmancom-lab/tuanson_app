@@ -1776,18 +1776,23 @@ story.append(Spacer(1, 12))
 
     # OUTSIDE THE IF BLOCK (Un-indented so it runs for ALL vouchers):
     summary_box_data = [
-            [
+        [
             left_content,
-            Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} ROUNDING ADJ: 0.00 NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
-            ]
-        ]
+            Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} 
+
+ROUNDING ADJ: 0.00
+
+
+NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
+]
+]
 summary_table = Table(summary_box_data, colWidths=[360, 180])
 summary_table.setStyle(TableStyle([
-            ('BOX', (0, 0), (-1, -1), 1, colors.black),
-            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('PADDING', (0, 0), (-1, -1), 6),
-        ]))
+('BOX', (0, 0), (-1, -1), 1, colors.black),
+('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
+('VALIGN', (0, 0), (-1, -1), 'TOP'),
+('PADDING', (0, 0), (-1, -1), 6),
+]))
 story.append(summary_table)
 story.append(Spacer(1, 40))
 
