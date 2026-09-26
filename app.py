@@ -1776,19 +1776,13 @@ if ewt_note_line:
         left_content.append(Spacer(1, 6))
         left_content.append(Paragraph(f"{ewt_note_line}", style_bold))
 
-    # UN-INDENTED -> ALWAYS EXECUTES (ROBOTO FONT & PESO SIGN PRESERVED)
-    summary_box_data = [
-        [
-            left_content,
-            Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} 
-
-ROUNDING ADJ: 0.00
-
-
-NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
-]
-]
-summary_table = Table(summary_box_data, colWidths=[360, 180])
+        summary_box_data = [
+            [
+                left_content,
+                Paragraph(f"SUB TOTAL: ₱{total_amt:,.2f} <br/>ROUNDING ADJ: 0.00 <br/>NET TOTAL PHP: ₱{total_amt:,.2f}", ParagraphStyle('RText', parent=style_normal, alignment=2))
+            ]
+        ]
+    summary_table = Table(summary_box_data, colWidths=[360, 180])
 summary_table.setStyle(TableStyle([
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
         ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
