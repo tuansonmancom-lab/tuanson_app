@@ -1774,7 +1774,7 @@ amount_in_words_str = amount_to_words(total_amt)
 # Left cell contains AMOUNT IN WORDS and optional Notes line if EWT exists
 left_content = [
     Paragraph(f"**AMOUNT IN WORDS:** {amount_in_words_str}", style_normal)
-]
+	]
 if ewt_note_line:
     left_content.append(Spacer(1, 6))
     left_content.append(Paragraph(f"{ewt_note_line}", style_bold))
