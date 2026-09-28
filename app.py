@@ -859,7 +859,7 @@ except ImportError:
     HAS_REPORTLAB = False
 
 
-
+'''
 # --- DATABASE SETUP (Turso / SQLite Integrated) ---
 @st.cache_resource
 def get_db_connection():
@@ -880,6 +880,54 @@ def get_db_connection():
             st.stop()
     else:
         return sqlite3.connect(db_url, check_same_thread=False)
+
+
+'''
+# --- DATABASE SETUP (Turso / SQLite Integrated) ---
+import os
+import sqlite3
+import streamlit as st
+
+@st.cache_resource
+def get_db_connection():
+    """
+    Dynamically connects to Turso if configured in Streamlit Secrets/Env,
+    otherwise falls back automatically to local inventory.db.
+    """
+    db_url = None
+    auth_token = ""
+
+    # 1. Attempt to fetch credentials from Streamlit Secrets or Environment Variables
+    try:
+        if "TURSO_DATABASE_URL" in st.secrets:
+            db_url = st.secrets["TURSO_DATABASE_URL"]
+            auth_token = st.secrets.get("TURSO_AUTH_TOKEN", "")
+        else:
+            db_url = os.getenv("TURSO_DATABASE_URL")
+            auth_token = os.getenv("TURSO_AUTH_TOKEN", "")
+    except Exception:
+        db_url = os.getenv("TURSO_DATABASE_URL")
+        auth_token = os.getenv("TURSO_AUTH_TOKEN", "")
+
+    # 2. If valid Turso remote URL exists, connect via libsql
+    if db_url and (str(db_url).startswith("libsql://") or str(db_url).startswith("https://") or str(db_url).startswith("wss://")):
+        try:
+            import libsql_experimental as turso_sqlite
+            return turso_sqlite.connect(db_url, auth_token=auth_token)
+        except ImportError:
+            st.error("Please install `libsql-experimental` to connect to Turso. Run: pip install libsql-experimental")
+            st.stop()
+        except Exception as e:
+            st.error(f"Failed to connect to Turso database: {e}")
+            st.stop()
+
+    # 3. Fallback to Local SQLite database (Plug-and-play for local drive E:\Tuanson_App_01)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    local_db_path = os.path.join(BASE_DIR, "inventory.db")
+
+    conn = sqlite3.connect(local_db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row  # Allows accessing columns by name
+    return conn
         
 #======================================================================================
 #                                    DATABASE                                         =
