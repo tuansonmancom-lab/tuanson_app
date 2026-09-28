@@ -2075,12 +2075,12 @@ st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
 st.sidebar.write(f"👤 **Logged in as:** {st.session_state.current_user}")
 #if st.sidebar.button("🚪 Logout"):
-    st.session_state.logged_in = False
-    st.session_state.current_user = ""
-    st.session_state.available_roles = []
-    st.session_state.can_add_act = "No"
-    st.session_state.can_add_item = "No"
-    st.rerun()
+#    st.session_state.logged_in = False
+#    st.session_state.current_user = ""
+#    st.session_state.available_roles = []
+#    st.session_state.can_add_act = "No"
+#    st.session_state.can_add_item = "No"
+#    st.rerun()
 
 st.sidebar.markdown("---")
 
