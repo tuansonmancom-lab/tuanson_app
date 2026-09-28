@@ -7,22 +7,6 @@ from datetime import datetime
 from io import BytesIO
 from datetime import datetime, timedelta
 
-#===============================================
-from datetime import datetime, timedelta
-
-def update_user_heartbeat(username):
-    """Updates the user's last_seen timestamp in the database."""
-    if username:
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        c.execute("UPDATE users SET last_seen = ? WHERE username = ?", (now_str, username))
-        conn.commit()
-
-def mark_user_offline(username):
-    """Clears or sets the user's last_seen to null upon manual logout."""
-    if username:
-        c.execute("UPDATE users SET last_seen = NULL WHERE username = ?", (username,))
-        conn.commit()
-#=============================================================
 #==========================================log out automatic
 import streamlit as st
 import streamlit.components.v1 as components
@@ -1184,13 +1168,6 @@ def init_db():
             ('60200', 'Direct Cost Materials', 'Expense')
         ])
 
-    # Add last_seen column if it doesn't exist
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN last_seen TEXT")
-        conn.commit()
-    except Exception:
-        pass  # Column already exists
-
     conn.commit()
 
 init_db()
@@ -2132,28 +2109,12 @@ else:
     setup_auto_logout(timeout_minutes=5)
 
     st.sidebar.success("Status: Online")
-    #if st.sidebar.button("Logout"):
-    #    st.session_state.clear()
-    #    st.rerun()
-
-    #st.title("🏗️ Tuanson Construction App")
-    st.write("Welcome back! Your session is active.")
-#====================
-# --- INSIDE MAIN APP LOOP (AFTER LOGIN CHECK) ---
-if st.session_state.get("logged_in"):
-    current_user = st.session_state.get("username")
-    
-    # 1. Update heartbeat on every Streamlit interaction
-    update_user_heartbeat(current_user)
-    
-    # 2. Maintain your 5-minute auto-logout timer
-    setup_auto_logout(timeout_minutes=5)
-
-    # 3. Handle manual logout
     if st.sidebar.button("Logout"):
-        mark_user_offline(current_user)
         st.session_state.clear()
         st.rerun()
+
+    st.title("🏗️ Tuanson Construction App")
+    st.write("Welcome back! Your session is active.")
 #====================
 
 role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.available_roles)
@@ -4154,8 +4115,6 @@ elif role == "Accounting":
                         st.rerun()
                 else:
                     st.info("No recorded payment vouchers found to delete.")
-                  
-   
     #==============================================================================================        
     # --- TAB 3: GENERAL LEDGER ---
     with tab_gl:
