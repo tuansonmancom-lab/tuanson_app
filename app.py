@@ -2113,7 +2113,7 @@ else:
         st.session_state.clear()
         st.rerun()
 
-    st.title("🏗️ Tuanson Construction App")
+    #st.title("🏗️ Tuanson Construction App")
     st.write("Welcome back! Your session is active.")
 #====================
 
