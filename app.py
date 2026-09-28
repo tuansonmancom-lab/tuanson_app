@@ -7,6 +7,36 @@ from datetime import datetime
 from io import BytesIO
 from datetime import datetime, timedelta
 
+#===========================================================
+def sync_table_columns(conn):
+    """Ensures existing tables have all required columns by auto-adding missing ones."""
+    
+    # 1. Check existing columns in the 'users' table
+    cursor = conn.execute("PRAGMA table_info(users)")
+    existing_user_cols = [row[1] for row in cursor.fetchall()]
+    
+    # Required columns for 'users' and their data types
+    required_user_cols = {
+        "email": "TEXT",
+        "password": "TEXT",
+        "role1": "TEXT",
+        "role2": "TEXT",
+        "role3": "TEXT",
+        "role4": "TEXT",
+        "role5": "TEXT",
+        "role6": "TEXT",
+        "status": "TEXT DEFAULT 'Active'",
+        "can_add_act": "INTEGER DEFAULT 0",
+        "can_add_item": "INTEGER DEFAULT 0"
+    }
+    
+    # Auto-add any missing column
+    for col_name, col_type in required_user_cols.items():
+        if col_name not in existing_user_cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type};")
+            
+    conn.commit()
+
 #==========================================log out automatic
 import streamlit as st
 import streamlit.components.v1 as components
@@ -1169,6 +1199,9 @@ def init_db():
         ])
 
     conn.commit()
+
+    # 2. Add missing columns to existing table
+    sync_table_columns(conn)
 
 init_db()
 #===============================database
