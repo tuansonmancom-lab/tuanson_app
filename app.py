@@ -2074,7 +2074,7 @@ if not st.session_state.logged_in:
 st.title("🏗️ Tuanson Construction - Procurement & Inventory")
 
 st.sidebar.write(f"👤 **Logged in as:** {st.session_state.current_user}")
-if st.sidebar.button("🚪 Logout"):
+#if st.sidebar.button("🚪 Logout"):
     st.session_state.logged_in = False
     st.session_state.current_user = ""
     st.session_state.available_roles = []
