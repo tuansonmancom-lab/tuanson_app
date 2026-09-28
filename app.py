@@ -859,7 +859,7 @@ except ImportError:
     HAS_REPORTLAB = False
 
 
-'''
+_old_code = '''
 # --- DATABASE SETUP (Turso / SQLite Integrated) ---
 @st.cache_resource
 def get_db_connection():
