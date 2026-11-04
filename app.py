@@ -8478,9 +8478,9 @@ elif role == "Admin View All":
                     unit = str(r['unit']).strip() if pd.notnull(r['unit']) else "PCS"
                     cat = str(r['category']).strip() if pd.notnull(r['category']) else "Direct Materials"
                     if item_no and desc:
-                        c.execute("INSERT OR REPLACE INTO materials (item_no, description, unit, category) VALUES (?, ?, ?, ?)", (item_no, desc, unit, cat))
+                        c.execute("INSERT INTO materials (item_no, description, unit, category) VALUES (?, ?, ?, ?)", (item_no, desc, unit, cat))
                 conn.commit()
-                st.success("Materials list updated!")
+                st.success("Materials list updated successfully!")
                 st.rerun()
 
         with st.expander("🏬 Manage Suppliers Master List"):
