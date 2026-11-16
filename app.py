@@ -5845,30 +5845,13 @@ if not st.session_state.available_roles:
 
 st.write("Welcome back! Your session is active.")
 #==============================end Login System=====================
+# --- SIDEBAR ROLE SELECTION ---
+if "available_roles" in st.session_state and st.session_state.available_roles:
+    role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.available_roles, key="global_role_selector")
+else:
+    role = "Requisitor"  # Fallback default if not set
 
-role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.available_roles)
-
-# --- OPTIMIZED CACHED DATA FUNCTIONS (Place these outside or at the top of your app) ---
-@st.cache_data(ttl=30)
-def get_cached_projects(conn):
-    return [r[0] for r in conn.execute("SELECT project_name FROM projects").fetchall()]
-
-@st.cache_data(ttl=30)
-def get_cached_activities(conn, project_name):
-    query = """SELECT a.activity_name FROM activities a 
-               JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
-    return [r[0] for r in conn.execute(query, (project_name,)).fetchall()]
-
-@st.cache_data(ttl=30)
-def get_cached_materials(conn):
-    return conn.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
-
-@st.cache_data(ttl=30)
-def get_cached_suppliers(conn):
-    return [r[0] for r in conn.execute("SELECT supplier_name FROM suppliers").fetchall()]
-
-
-# --- ROLE 1: REQUISITOR (OPTIMIZED) ---
+# --- ROLE 1: REQUISITOR ---
 if role == "Requisitor":
     st.subheader(f"📋 Requisitor Dashboard - {st.session_state.current_user}")
     
@@ -5966,7 +5949,7 @@ if role == "Requisitor":
                                 VALUES (?, ?, 1.0, ?, 0.0)
                             """, (proj_id_row[0], selected_activity, unit))
                             conn.commit()
-                            st.cache_data.clear() # Clear cache so new activity appears instantly
+                            st.cache_data.clear()
 
                     if selected_mat_label == "➕ Add New Item...":
                         c.execute("""
@@ -5978,7 +5961,7 @@ if role == "Requisitor":
                                 category = excluded.category
                         """, (item_no.strip(), description.strip(), unit.strip(), category))
                         conn.commit()
-                        st.cache_data.clear() # Clear cache so new item appears instantly
+                        st.cache_data.clear()
 
                     st.session_state.request_cart.append({
                         "Project": selected_project,
@@ -6024,7 +6007,6 @@ if role == "Requisitor":
                 conn.commit()
                 st.session_state.request_cart = [] 
                 
-                # --- EMAIL NOTIFICATION ---
                 try:
                     purchasers = c.execute("""
                         SELECT DISTINCT email FROM users 
@@ -6153,6 +6135,7 @@ if role == "Requisitor":
 
     with tab_receive:
         render_receive_tab(conn)
+        
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
     st.subheader("🛒 Purchaser Dashboard")
