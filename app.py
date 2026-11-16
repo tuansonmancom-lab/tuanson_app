@@ -5848,28 +5848,48 @@ st.write("Welcome back! Your session is active.")
 
 role = st.sidebar.selectbox("🔑 Select Your Active Role", st.session_state.available_roles)
 
-# --- ROLE 1: REQUISITOR ---
+# --- OPTIMIZED CACHED DATA FUNCTIONS (Place these outside or at the top of your app) ---
+@st.cache_data(ttl=30)
+def get_cached_projects(conn):
+    return [r[0] for r in conn.execute("SELECT project_name FROM projects").fetchall()]
+
+@st.cache_data(ttl=30)
+def get_cached_activities(conn, project_name):
+    query = """SELECT a.activity_name FROM activities a 
+               JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
+    return [r[0] for r in conn.execute(query, (project_name,)).fetchall()]
+
+@st.cache_data(ttl=30)
+def get_cached_materials(conn):
+    return conn.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
+
+@st.cache_data(ttl=30)
+def get_cached_suppliers(conn):
+    return [r[0] for r in conn.execute("SELECT supplier_name FROM suppliers").fetchall()]
+
+
+# --- ROLE 1: REQUISITOR (OPTIMIZED) ---
 if role == "Requisitor":
     st.subheader(f"📋 Requisitor Dashboard - {st.session_state.current_user}")
     
     tab_request, tab_track, tab_receive = st.tabs(["📝 New Material Request", "🔍 Track My Requests", "📦 Receive Incoming Items"])
     
-      
-    with tab_request:
+    # ----------------------------------------------------
+    # TAB 1: NEW MATERIAL REQUEST (Wrapped in Fragment)
+    # ----------------------------------------------------
+    @st.fragment
+    def render_request_tab(conn):
         if "request_cart" not in st.session_state:
             st.session_state.request_cart = []
         
         col_proj, col_act = st.columns(2)
         
-        projects = [r[0] for r in c.execute("SELECT project_name FROM projects").fetchall()]
+        projects = get_cached_projects(conn)
         if not projects:
             projects = ["No projects available"]
-        selected_project = col_proj.selectbox("Project Name", projects)
+        selected_project = col_proj.selectbox("Project Name", projects, key="req_project")
         
-        act_query = """SELECT a.activity_name FROM activities a 
-                       JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
-        activities = [r[0] for r in c.execute(act_query, (selected_project,)).fetchall()]
-        
+        activities = get_cached_activities(conn, selected_project)
         activity_options = list(activities)
         if st.session_state.get('can_add_act') == 'Yes':
             activity_options.append("➕ Add New Activity...")
@@ -5877,14 +5897,14 @@ if role == "Requisitor":
         if not activity_options:
             activity_options = ["No activities available"]
             
-        selected_activity_option = col_act.selectbox("Activity", activity_options)
+        selected_activity_option = col_act.selectbox("Activity", activity_options, key="req_activity")
         
         selected_activity = selected_activity_option
         if selected_activity_option == "➕ Add New Activity...":
-            new_activity_input = st.text_input("Enter New Activity Name")
+            new_activity_input = st.text_input("Enter New Activity Name", key="new_act_input")
             selected_activity = new_activity_input.strip()
 
-        materials = c.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
+        materials = get_cached_materials(conn)
         mat_options = {f"[{m[0]}] {m[1]}": (m[0], m[1], m[2], m[3]) for m in materials} if materials else {}
         
         mat_label_options = list(mat_options.keys())
@@ -5894,13 +5914,13 @@ if role == "Requisitor":
         if not mat_label_options:
             mat_label_options = ["No items available"]
              
-        selected_mat_label = st.selectbox("Select Item", mat_label_options)
+        selected_mat_label = st.selectbox("Select Item", mat_label_options, key="req_mat_select")
         
         if selected_mat_label == "➕ Add New Item...":
             st.info("💡 Registering a new item for this request:")
             col_ni1, col_ni2 = st.columns(2)
-            item_no = col_ni1.text_input("New Item Number (e.g., 00007 or custom code)")
-            description = col_ni2.text_input("Item Description")
+            item_no = col_ni1.text_input("New Item Number (e.g., 00007 or custom code)", key="ni_num")
+            description = col_ni2.text_input("Item Description", key="ni_desc")
             default_unit = "PCS"
             default_category = "Direct Materials"
         elif selected_mat_label == "No items available":
@@ -5909,7 +5929,7 @@ if role == "Requisitor":
         else:
             item_no, description, default_unit, default_category = mat_options[selected_mat_label]
         
-        suppliers = [r[0] for r in c.execute("SELECT supplier_name FROM suppliers").fetchall()]
+        suppliers = get_cached_suppliers(conn)
         supplier_options = ["No Preference"] + suppliers
 
         with st.form("request_form"):
@@ -5930,6 +5950,7 @@ if role == "Requisitor":
             add_to_list = st.form_submit_button("➕ Add to Temporary List")
             
             if add_to_list:
+                c = conn.cursor()
                 if selected_mat_label == "No items available":
                     st.error("⚠️ Cannot add to list. No materials selected.")
                 elif selected_activity_option == "➕ Add New Activity..." and not selected_activity:
@@ -5945,6 +5966,7 @@ if role == "Requisitor":
                                 VALUES (?, ?, 1.0, ?, 0.0)
                             """, (proj_id_row[0], selected_activity, unit))
                             conn.commit()
+                            st.cache_data.clear() # Clear cache so new activity appears instantly
 
                     if selected_mat_label == "➕ Add New Item...":
                         c.execute("""
@@ -5956,6 +5978,7 @@ if role == "Requisitor":
                                 category = excluded.category
                         """, (item_no.strip(), description.strip(), unit.strip(), category))
                         conn.commit()
+                        st.cache_data.clear() # Clear cache so new item appears instantly
 
                     st.session_state.request_cart.append({
                         "Project": selected_project,
@@ -5981,72 +6004,58 @@ if role == "Requisitor":
             edited_cart_df = st.data_editor(
                 cart_df, 
                 num_rows="dynamic",
-                width="stretch",
                 key="cart_editor"
             )
             
             st.session_state.request_cart = edited_cart_df.to_dict('records')
             
-            if st.button("🚀 Submit All Requests to Purchasing"):
+            if st.button("🚀 Submit All Requests to Purchasing", type="primary"):
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                c = conn.cursor()
                 
                 for item in st.session_state.request_cart:
                     amount = item["Qty"] * item["Price"]
                     c.execute("""INSERT INTO requests 
-                                 (timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, email_address, status, supplier, requester_name)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Purchaser', ?, ?)""",
-                              (now, item["Project"], item["Activity"], item["Item No"], item["Description"], 
-                               item["Category"], item["Qty"], item["Unit"], item["Price"], amount, item["Email"], item["supplier"], st.session_state.current_user))
+                               (timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, email_address, status, supplier, requester_name)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Purchaser', ?, ?)""",
+                            (now, item["Project"], item["Activity"], item["Item No"], item["Description"], 
+                             item["Category"], item["Qty"], item["Unit"], item["Price"], amount, item["Email"], item["supplier"], st.session_state.current_user))
                 
                 conn.commit()
                 st.session_state.request_cart = [] 
                 
-                #==========================================Email notification===========================
-                
-
-                # --- EMAIL NOTIFICATION TO PURCHASER(S) ---
+                # --- EMAIL NOTIFICATION ---
                 try:
-                    # 1. Fetch active email addresses for any user assigned as 'Purchaser'
                     purchasers = c.execute("""
                         SELECT DISTINCT email FROM users 
-                        WHERE status = 'Active' 
-                        AND email IS NOT NULL 
-                        AND email != '' 
+                        WHERE status = 'Active' AND email IS NOT NULL AND email != '' 
                         AND (role1 = 'Purchaser' OR role2 = 'Purchaser' OR role3 = 'Purchaser' 
                              OR role4 = 'Purchaser' OR role5 = 'Purchaser' OR role6 = 'Purchaser')
                     """).fetchall()
-        
-                    requester_name = st.session_state.get('username', 'A Requisitor')
-        
-                    # 2. Loop through and send email to each Purchaser
+                    
+                    requester_name = st.session_state.get('username', st.session_state.current_user)
+                    
                     for row in purchasers:
-                        purchaser_email = row[0]
                         send_notification(
-                            to_email=purchaser_email,
+                            to_email=row[0],
                             subject="📦 New Purchase Request Submitted",
-                            body=f"""New Purchase Request Submitted
-                                    Submitted By: {requester_name}
-        
-                                    New items have been added to the purchasing queue.
-        
-                                    Please log in to the Construction Management System to process the Purchase Order.
-        
-                                """
-                            )
+                            body=f"Submitted By: {requester_name}\n\nNew items have been added to the purchasing queue."
+                        )
                 except Exception as e:
                     st.warning(f"Submitted successfully, but could not send email alert: {e}")
-        
-            
-        
-                st.success("All items successfully submitted to Purchasing!")
                 
-
-                #===========================================end of email notication=====================
+                st.success("All items successfully submitted to Purchasing!")
                 st.rerun()
 
-           
+    with tab_request:
+        render_request_tab(conn)
 
-    with tab_track:
+
+    # ----------------------------------------------------
+    # TAB 2: TRACK MY REQUESTS (Wrapped in Fragment)
+    # ----------------------------------------------------
+    @st.fragment
+    def render_track_tab(conn):
         st.write(f"### 🔍 Request History for {st.session_state.current_user}")
         st.info("Track the live status of all your submitted material requests here.")
         
@@ -6066,17 +6075,22 @@ if role == "Requisitor":
         """, conn, params=(st.session_state.current_user,))
         
         if not history_df.empty:
-            st.dataframe(history_df, width="stretch", hide_index=True)
+            st.dataframe(history_df, hide_index=True)
         else:
             st.info("You haven't submitted any material requests yet.")
 
-    with tab_receive:
+    with tab_track:
+        render_track_tab(conn)
+
+
+    # ----------------------------------------------------
+    # TAB 3: RECEIVE INCOMING ITEMS (Wrapped in Fragment)
+    # ----------------------------------------------------
+    @st.fragment
+    def render_receive_tab(conn):
         st.write("### 📦 Receive Incoming Site Dispatches")
         st.info("Confirm the physical receipt of materials dispatched to your project site.")
         
-        if st.button("🔄 Refresh Dispatches", key="btn_refresh_receiving"):
-            st.rerun()
-            
         user_projects_df = pd.read_sql_query("""
             SELECT DISTINCT project_name 
             FROM requests 
@@ -6086,7 +6100,7 @@ if role == "Requisitor":
         user_projects = user_projects_df['project_name'].tolist() if not user_projects_df.empty else []
         
         if not user_projects:
-            st.warning("⚠️ No project history found for your account in requests. Please ensure you have made a project request first.")
+            st.warning("⚠️ No project history found for your account in requests.")
         else:
             placeholders = ','.join(['?'] * len(user_projects))
             query = f"""
@@ -6107,10 +6121,9 @@ if role == "Requisitor":
             pending_ledger_df = pd.read_sql_query(query, conn, params=tuple(user_projects))
             
             if not pending_ledger_df.empty:
-                st.dataframe(pending_ledger_df.drop(columns=['id']), width="stretch", hide_index=True)
+                st.dataframe(pending_ledger_df.drop(columns=['id']), hide_index=True)
                 
                 st.write("#### ✅ Confirm Physical Receipt")
-                
                 options_dict = {
                     row['id']: f"ID: {row['id']} | {row['Item Description']} ({row['Qty Dispatched']} units) - Ref: {row['Ref / MIF No.']} @ {row['Destination Project']}"
                     for _, row in pending_ledger_df.iterrows()
@@ -6119,28 +6132,27 @@ if role == "Requisitor":
                 item_to_receive = st.selectbox(
                     "Select Dispatch to Confirm", 
                     options=list(options_dict.keys()),
-                    format_func=lambda x: options_dict[x]
+                    format_func=lambda x: options_dict[x],
+                    key="receive_select"
                 )
                 
-                if st.button("Confirm Physical Receipt", type="primary"):
+                if st.button("Confirm Physical Receipt", type="primary", key="confirm_receipt_btn"):
                     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    
+                    c = conn.cursor()
                     c.execute("""
                         UPDATE inventory_ledger 
                         SET status = 'Completed', 
                             remarks = remarks || ' | Confirmed received on ' || ? 
                         WHERE id = ?
                     """, (current_time, item_to_receive))
-                    
                     conn.commit()
                     st.success("✅ Material receipt confirmed successfully!")
                     st.rerun()
             else:
                 st.info(f"🎉 No pending dispatches awaiting confirmation for your projects: {', '.join(user_projects)}.")
 
-            
-                    
-#=================================================================================
+    with tab_receive:
+        render_receive_tab(conn)
 # --- ROLE 2: PURCHASER ---
 elif role == "Purchaser":
     st.subheader("🛒 Purchaser Dashboard")
