@@ -1,3 +1,11 @@
+
+
+import sqlite3
+import pandas as pd
+import streamlit as st
+import re
+import os
+
 # --- TOP OF APP.PY ---
 @st.cache_data(ttl=30)
 def get_cached_projects(_conn):
@@ -16,12 +24,8 @@ def get_cached_materials(_conn):
 @st.cache_data(ttl=30)
 def get_cached_suppliers(_conn):
     return [r[0] for r in _conn.execute("SELECT supplier_name FROM suppliers").fetchall()]
+    
 
-import sqlite3
-import pandas as pd
-import streamlit as st
-import re
-import os
 from datetime import datetime
 from io import BytesIO
 from datetime import datetime, timedelta
