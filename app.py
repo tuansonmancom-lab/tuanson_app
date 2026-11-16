@@ -1,3 +1,22 @@
+# --- TOP OF APP.PY ---
+@st.cache_data(ttl=30)
+def get_cached_projects(_conn):
+    return [r[0] for r in _conn.execute("SELECT project_name FROM projects").fetchall()]
+
+@st.cache_data(ttl=30)
+def get_cached_activities(_conn, project_name):
+    query = """SELECT a.activity_name FROM activities a 
+               JOIN projects p ON a.project_id = p.id WHERE p.project_name = ?"""
+    return [r[0] for r in _conn.execute(query, (project_name,)).fetchall()]
+
+@st.cache_data(ttl=30)
+def get_cached_materials(_conn):
+    return _conn.execute("SELECT item_no, description, unit, COALESCE(category, 'Direct Materials') FROM materials").fetchall()
+
+@st.cache_data(ttl=30)
+def get_cached_suppliers(_conn):
+    return [r[0] for r in _conn.execute("SELECT supplier_name FROM suppliers").fetchall()]
+
 import sqlite3
 import pandas as pd
 import streamlit as st
