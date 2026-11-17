@@ -6725,102 +6725,109 @@ if role == "Purchaser":
     elif not approved_pos:
         st.info("No approved purchase orders currently available for printing.")
         
-# --- ROLE 3: APPROVER ---
+# --- ROLE 3: APPROVER (OPTIMIZED) ---
 elif role == "Approver":
     st.subheader("✅ Approver Dashboard (Leizel Cabunilas)")
 
-    if st.button("🔄 Refresh Approval Queue", key="btn_refresh_approver_queue"):
-        st.rerun()
-        
-    st.subheader("⏳ Pending Approval Queue")
-    pending_pos = c.execute("""
-        SELECT pono, supplier, project_name, MAX(timestamp) as req_time 
-        FROM requests 
-        WHERE status = 'Pending Approval' AND pono IS NOT NULL AND pono != ''
-        GROUP BY pono
-        ORDER BY req_time DESC
-    """).fetchall()
-    
-    if not pending_pos:
-        st.info("No Purchase Orders currently awaiting approval.")
-    else:
-        for po in pending_pos:
-            pono, supplier, proj, req_time = po
-            
-            with st.expander(f"📄 PO #{pono} | Supplier: {supplier} | Project: {proj} | Submitted: {req_time}", expanded=True):
-                po_items_df = pd.read_sql_query(
-                    "SELECT item_no, description, qty, unit, price, amount FROM requests WHERE pono = ? AND status = 'Pending Approval'", 
-                    conn, params=(pono,)
-                )
-                
-                st.dataframe(po_items_df, width="stretch", hide_index=True)
-                total_amount = po_items_df["amount"].sum()
-                st.markdown(f"### **Grand Total: ₱{total_amount:,.2f}**")
-                
-                col_app, col_rej, _ = st.columns([1, 1, 3])
-                
-                if col_app.button("✅ Approve PO", key=f"app_{pono}", type="primary"):
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    c.execute("""
-                        UPDATE requests 
-                        SET status = 'Approved / Ongoing', approved_by = 'Leizel Cabunilas', approved_timestamp = ?
-                        WHERE pono = ? AND status = 'Pending Approval'
-                    """, (now_str, pono))
-                    conn.commit()
-                    st.success(f"PO #{pono} has been approved successfully!")
-                    st.rerun()
-                
-                # --- NEW TWO-STEP REJECTION LOGIC ---
-                with col_rej.popover("❌ Reject PO"):
-                    st.markdown(f"**Are you sure you want to reject PO #{pono}?**")
-                    reject_reason = st.text_area("Reason for rejection (Required):", key=f"reason_{pono}")
-                    
-                    if st.button("🚨 Confirm Rejection", key=f"confirm_rej_{pono}"):
-                        if not reject_reason.strip():
-                            st.error("Please provide a reason to reject this PO.")
-                        else:
-                            # UPDATED: Now saving the reject_reason to your new database column
-                            c.execute("""
-                                UPDATE requests 
-                                SET status = 'Rejected', rejection_reason = ?
-                                WHERE pono = ? AND status = 'Pending Approval'
-                            """, (reject_reason, pono))
-                            conn.commit()
-                            
-                            st.success(f"PO #{pono} was rejected.")
-                            import time
-                            time.sleep(1) 
-                            st.rerun()
+    @st.fragment
+    def render_approver_dashboard(conn):
+        c = conn.cursor()
 
-    st.markdown("---")
-    st.subheader("🖨️ Approved Purchase Orders (Ready for Printing)")
-    
-    approved_pos = c.execute("""
-        SELECT pono, supplier, project_name, MAX(approved_timestamp) as app_time 
-        FROM requests 
-        WHERE status = 'Approved / Ongoing' AND pono IS NOT NULL AND pono != ''
-        GROUP BY pono
-        ORDER BY app_time DESC
-    """).fetchall()
-    
-    if approved_pos and HAS_REPORTLAB:
-        for idx, po in enumerate(approved_pos):
-            pono, supplier, proj, app_time = po
-            col_info, col_btn = st.columns([3, 1])
-            col_info.write(f"📄 **PO Number:** {pono} | **Supplier:** {supplier} | **Project:** {proj} | **Approved:** {app_time}")
+        if st.button("🔄 Refresh Approval Queue", key="btn_refresh_approver_queue"):
+            st.rerun()
             
-            po_items = c.execute("SELECT qty, unit, description, activity, price, amount FROM requests WHERE pono = ?", (pono,)).fetchall()
-            pdf_bytes = create_po_pdf(pono, datetime.now().strftime("%Y/%m/%d"), supplier, proj, po_items)
-            
-            col_btn.download_button(
-                label=f"🖨️ Print PO #{pono}",
-                data=pdf_bytes,
-                file_name=f"PO_{pono}.pdf",
-                mime="application/pdf",
-                key=f"approver_pdf_{pono}_{idx}"
-            )
-    elif not approved_pos:
-        st.info("No approved purchase orders available for printing.")
+        st.subheader("⏳ Pending Approval Queue")
+        pending_pos = c.execute("""
+            SELECT pono, supplier, project_name, MAX(timestamp) as req_time 
+            FROM requests 
+            WHERE status = 'Pending Approval' AND pono IS NOT NULL AND pono != ''
+            GROUP BY pono
+            ORDER BY req_time DESC
+        """).fetchall()
+        
+        if not pending_pos:
+            st.info("No Purchase Orders currently awaiting approval.")
+        else:
+            for po in pending_pos:
+                pono, supplier, proj, req_time = po
+                
+                with st.expander(f"📄 PO #{pono} | Supplier: {supplier} | Project: {proj} | Submitted: {req_time}", expanded=True):
+                    po_items_df = pd.read_sql_query(
+                        "SELECT item_no, description, qty, unit, price, amount FROM requests WHERE pono = ? AND status = 'Pending Approval'", 
+                        conn, params=(pono,)
+                    )
+                    
+                    st.dataframe(po_items_df, hide_index=True)
+                    total_amount = po_items_df["amount"].sum()
+                    st.markdown(f"### **Grand Total: ₱{total_amount:,.2f}**")
+                    
+                    col_app, col_rej, _ = st.columns([1, 1, 3])
+                    
+                    if col_app.button("✅ Approve PO", key=f"app_{pono}", type="primary"):
+                        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        c.execute("""
+                            UPDATE requests 
+                            SET status = 'Approved / Ongoing', approved_by = 'Leizel Cabunilas', approved_timestamp = ?
+                            WHERE pono = ? AND status = 'Pending Approval'
+                        """, (now_str, pono))
+                        conn.commit()
+                        st.cache_data.clear()
+                        st.success(f"PO #{pono} has been approved successfully!")
+                        st.rerun()
+                    
+                    # --- TWO-STEP REJECTION LOGIC ---
+                    with col_rej.popover("❌ Reject PO"):
+                        st.markdown(f"**Are you sure you want to reject PO #{pono}?**")
+                        reject_reason = st.text_area("Reason for rejection (Required):", key=f"reason_{pono}")
+                        
+                        if st.button("🚨 Confirm Rejection", key=f"confirm_rej_{pono}"):
+                            if not reject_reason.strip():
+                                st.error("Please provide a reason to reject this PO.")
+                            else:
+                                c.execute("""
+                                    UPDATE requests 
+                                    SET status = 'Rejected', rejection_reason = ?
+                                    WHERE pono = ? AND status = 'Pending Approval'
+                                """, (reject_reason, pono))
+                                conn.commit()
+                                st.cache_data.clear()
+                                
+                                st.success(f"PO #{pono} was rejected.")
+                                import time
+                                time.sleep(1) 
+                                st.rerun()
+
+        st.markdown("---")
+        st.subheader("🖨️ Approved Purchase Orders (Ready for Printing)")
+        
+        approved_pos = c.execute("""
+            SELECT pono, supplier, project_name, MAX(approved_timestamp) as app_time 
+            FROM requests 
+            WHERE status = 'Approved / Ongoing' AND pono IS NOT NULL AND pono != ''
+            GROUP BY pono
+            ORDER BY app_time DESC
+        """).fetchall()
+        
+        if approved_pos and HAS_REPORTLAB:
+            for idx, po in enumerate(approved_pos):
+                pono, supplier, proj, app_time = po
+                col_info, col_btn = st.columns([3, 1])
+                col_info.write(f"📄 **PO Number:** {pono} | **Supplier:** {supplier} | **Project:** {proj} | **Approved:** {app_time}")
+                
+                po_items = c.execute("SELECT qty, unit, description, activity, price, amount FROM requests WHERE pono = ?", (pono,)).fetchall()
+                pdf_bytes = create_po_pdf(pono, datetime.now().strftime("%Y/%m/%d"), supplier, proj, po_items)
+                
+                col_btn.download_button(
+                    label=f"🖨️ Print PO #{pono}",
+                    data=pdf_bytes,
+                    file_name=f"PO_{pono}.pdf",
+                    mime="application/pdf",
+                    key=f"approver_pdf_{pono}_{idx}"
+                )
+        elif not approved_pos:
+            st.info("No approved purchase orders available for printing.")
+
+    render_approver_dashboard(conn)
 
 # --- ROLE 4: OFFICE MANAGER ---
 elif role == "Office Manager":
