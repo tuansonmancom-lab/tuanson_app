@@ -6992,6 +6992,7 @@ elif role == "Accounting":
         if st.button("🔄 Refresh Accounting Data", key="btn_refresh_accounting"):
             st.rerun()
         
+        # Ensure all 7 tabs are declared together in the correct order:
         tab_coa, tab_apv, tab_payment, tab_gl, tab_fs, tab_br, tab_brm = st.tabs([
             "📊 Chart of Accounts", 
             "📝 Accounts Payable Voucher (APV)", 
