@@ -6829,127 +6829,131 @@ elif role == "Approver":
 
     render_approver_dashboard(conn)
 
-# --- ROLE 4: OFFICE MANAGER ---
+# --- ROLE 4: OFFICE MANAGER (OPTIMIZED) ---
 elif role == "Office Manager":
     st.subheader("📊 Office Manager Dashboard - Project Status & Expenses")
 
-    if st.button("🔄 Refresh Financial Data", key="btn_refresh_office_manager"):
-        st.rerun()
-    
-    st.write("### 📈 Real-Time Project Financial Monitoring")
-    
-    projects_df = pd.read_sql_query("""
-        SELECT 
-            p.id as 'No.', 
-            p.project_name as 'Project Name', 
-            COALESCE(SUM(a.contract_amount), 0) as 'CONTRACT Amount'
-        FROM projects p
-        LEFT JOIN activities a ON p.id = a.project_id
-        GROUP BY p.id, p.project_name
-    """, conn)
-    
-    expenses_df = pd.read_sql_query("""
-        SELECT 
-            project_name, 
-            category, 
-            SUM(amount) as cost
-        FROM requests
-        WHERE status IN ('Approved / Ongoing', 'Received', 'Paid')
-        GROUP BY project_name, category
-    """, conn)
-    
-    if not expenses_df.empty:
-        pivot_exp = expenses_df.pivot_table(index='project_name', columns='category', values='cost', fill_value=0).reset_index()
-    else:
-        pivot_exp = pd.DataFrame(columns=['project_name'])
-        
-    merged_df = pd.merge(projects_df, pivot_exp, left_on='Project Name', right_on='project_name', how='left').fillna(0)
-    
-    def safe_get_cat(df, cat_name):
-        return df[cat_name] if cat_name in df.columns else 0.0
-
-    merged_df['MATERIALS Amount'] = safe_get_cat(merged_df, 'Direct Materials') + safe_get_cat(merged_df, 'Tools & Consumables')
-    merged_df['SUBCON'] = safe_get_cat(merged_df, 'Subcontract & Services')
-    merged_df['EQPT Amount'] = safe_get_cat(merged_df, 'Equipment & Rental') + safe_get_cat(merged_df, 'Fuel & Lubricants')
-    
-    merged_df['Labor Amount'] = 0.0  
-    merged_df['ADMIN'] = 0.0
-    merged_df['REVISED Amount'] = merged_df['CONTRACT Amount'] 
-    merged_df['Implementing Budget Amount'] = merged_df['CONTRACT Amount'] * 0.42 
-    merged_df['Implementing Budget %'] = 0.42 
-    
-    merged_df['TOTAL Amount'] = (merged_df['MATERIALS Amount'] + merged_df['Labor Amount'] + 
-                                 merged_df['ADMIN'] + merged_df['SUBCON'] + merged_df['EQPT Amount'])
-    
-    for col, target in [('MATERIALS Amount', 'Mat %'), ('Labor Amount', 'Lab %'), 
-                        ('EQPT Amount', 'Eqpt %'), ('TOTAL Amount', 'Total %')]:
-        merged_df[target] = (merged_df[col] / merged_df['Implementing Budget Amount']).replace([float('inf'), -float('inf')], 0.0).fillna(0.0)
-        
-    final_columns = [
-        'No.', 'Project Name', 'CONTRACT Amount', 'REVISED Amount',
-        'Implementing Budget %', 'Implementing Budget Amount',
-        'Mat %', 'MATERIALS Amount', 'Lab %', 'Labor Amount', 'ADMIN', 'SUBCON',
-        'Eqpt %', 'EQPT Amount', 'Total %', 'TOTAL Amount'
-    ]
-    
-    for col in final_columns:
-        if col not in merged_df.columns:
-            merged_df[col] = 0.0
+    @st.fragment
+    def render_office_manager_dashboard(conn):
+        if st.button("🔄 Refresh Financial Data", key="btn_refresh_office_manager"):
+            st.rerun()
             
-    final_df = merged_df[final_columns]
-    
-    final_df.columns = pd.MultiIndex.from_tuples([
-        ('Project Details', 'No.'),
-        ('Project Details', 'Project Name'),
-        ('Project Details', 'CONTRACT Amount'),
-        ('Project Details', 'REVISED Amount'),
-        ('Implementing Budget', '%'),
-        ('Implementing Budget', 'Amount'),
-        ('Running Expenses', 'Mat %'),
-        ('Running Expenses', 'MATERIALS Amount'),
-        ('Running Expenses', 'Lab %'),
-        ('Running Expenses', 'Labor Amount'),
-        ('Running Expenses', 'ADMIN'),
-        ('Running Expenses', 'SUBCON'),
-        ('Running Expenses', 'Eqpt %'),
-        ('Running Expenses', 'EQPT Amount'),
-        ('Running Expenses', 'Total %'),
-        ('Running Expenses', 'TOTAL Amount')
-    ])
-    
-    styled_df = final_df.style.format({
-        ('Project Details', 'CONTRACT Amount'): "₱{:,.2f}",
-        ('Project Details', 'REVISED Amount'): "₱{:,.2f}",
-        ('Implementing Budget', '%'): "{:.2%}",
-        ('Implementing Budget', 'Amount'): "₱{:,.2f}",
-        ('Running Expenses', 'Mat %'): "{:.2%}",
-        ('Running Expenses', 'MATERIALS Amount'): "₱{:,.2f}",
-        ('Running Expenses', 'Lab %'): "{:.2%}",
-        ('Running Expenses', 'Labor Amount'): "₱{:,.2f}",
-        ('Running Expenses', 'ADMIN'): "₱{:,.2f}",
-        ('Running Expenses', 'SUBCON'): "₱{:,.2f}",
-        ('Running Expenses', 'Eqpt %'): "{:.2%}",
-        ('Running Expenses', 'EQPT Amount'): "₱{:,.2f}",
-        ('Running Expenses', 'Total %'): "{:.2%}",
-        ('Running Expenses', 'TOTAL Amount'): "₱{:,.2f}",
-    })
-    
-    st.dataframe(styled_df, width="stretch", hide_index=True)
+        st.write("### 📈 Real-Time Project Financial Monitoring")
+        
+        projects_df = pd.read_sql_query("""
+            SELECT 
+                p.id as 'No.', 
+                p.project_name as 'Project Name', 
+                COALESCE(SUM(a.contract_amount), 0) as 'CONTRACT Amount'
+            FROM projects p
+            LEFT JOIN activities a ON p.id = a.project_id
+            GROUP BY p.id, p.project_name
+        """, conn)
+        
+        expenses_df = pd.read_sql_query("""
+            SELECT 
+                project_name, 
+                category, 
+                SUM(amount) as cost
+            FROM requests
+            WHERE status IN ('Approved / Ongoing', 'Received', 'Paid')
+            GROUP BY project_name, category
+        """, conn)
+        
+        if not expenses_df.empty:
+            pivot_exp = expenses_df.pivot_table(index='project_name', columns='category', values='cost', fill_value=0).reset_index()
+        else:
+            pivot_exp = pd.DataFrame(columns=['project_name'])
+            
+        merged_df = pd.merge(projects_df, pivot_exp, left_on='Project Name', right_on='project_name', how='left').fillna(0)
+        
+        def safe_get_cat(df, cat_name):
+            return df[cat_name] if cat_name in df.columns else 0.0
 
-    col_dl1, col_dl2 = st.columns([1, 4])
-    
-    export_df = final_df.copy()
-    export_df.columns = ['_'.join(col).strip() for col in export_df.columns.values]
-    
-    csv_summary = export_df.to_csv(index=False).encode('utf-8')
-    col_dl1.download_button(
-        label="📥 Download Summary (CSV)",
-        data=csv_summary,
-        file_name=f"project_financial_summary_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv"
-    )
+        merged_df['MATERIALS Amount'] = safe_get_cat(merged_df, 'Direct Materials') + safe_get_cat(merged_df, 'Tools & Consumables')
+        merged_df['SUBCON'] = safe_get_cat(merged_df, 'Subcontract & Services')
+        merged_df['EQPT Amount'] = safe_get_cat(merged_df, 'Equipment & Rental') + safe_get_cat(merged_df, 'Fuel & Lubricants')
+        
+        merged_df['Labor Amount'] = 0.0  
+        merged_df['ADMIN'] = 0.0
+        merged_df['REVISED Amount'] = merged_df['CONTRACT Amount'] 
+        merged_df['Implementing Budget Amount'] = merged_df['CONTRACT Amount'] * 0.42 
+        merged_df['Implementing Budget %'] = 0.42 
+        
+        merged_df['TOTAL Amount'] = (merged_df['MATERIALS Amount'] + merged_df['Labor Amount'] + 
+                                   merged_df['ADMIN'] + merged_df['SUBCON'] + merged_df['EQPT Amount'])
+        
+        for col, target in [('MATERIALS Amount', 'Mat %'), ('Labor Amount', 'Lab %'), 
+                            ('EQPT Amount', 'Eqpt %'), ('TOTAL Amount', 'Total %')]:
+            merged_df[target] = (merged_df[col] / merged_df['Implementing Budget Amount']).replace([float('inf'), -float('inf')], 0.0).fillna(0.0)
+            
+        final_columns = [
+            'No.', 'Project Name', 'CONTRACT Amount', 'REVISED Amount',
+            'Implementing Budget %', 'Implementing Budget Amount',
+            'Mat %', 'MATERIALS Amount', 'Lab %', 'Labor Amount', 'ADMIN', 'SUBCON',
+            'Eqpt %', 'EQPT Amount', 'Total %', 'TOTAL Amount'
+        ]
+        
+        for col in final_columns:
+            if col not in merged_df.columns:
+                merged_df[col] = 0.0
+                
+        final_df = merged_df[final_columns]
+        
+        final_df.columns = pd.MultiIndex.from_tuples([
+            ('Project Details', 'No.'),
+            ('Project Details', 'Project Name'),
+            ('Project Details', 'CONTRACT Amount'),
+            ('Project Details', 'REVISED Amount'),
+            ('Implementing Budget', '%'),
+            ('Implementing Budget', 'Amount'),
+            ('Running Expenses', 'Mat %'),
+            ('Running Expenses', 'MATERIALS Amount'),
+            ('Running Expenses', 'Lab %'),
+            ('Running Expenses', 'Labor Amount'),
+            ('Running Expenses', 'ADMIN'),
+            ('Running Expenses', 'SUBCON'),
+            ('Running Expenses', 'Eqpt %'),
+            ('Running Expenses', 'EQPT Amount'),
+            ('Running Expenses', 'Total %'),
+            ('Running Expenses', 'TOTAL Amount')
+        ])
+        
+        styled_df = final_df.style.format({
+            ('Project Details', 'CONTRACT Amount'): "₱{:,.2f}",
+            ('Project Details', 'REVISED Amount'): "₱{:,.2f}",
+            ('Implementing Budget', '%'): "{:.2%}",
+            ('Implementing Budget', 'Amount'): "₱{:,.2f}",
+            ('Running Expenses', 'Mat %'): "{:.2%}",
+            ('Running Expenses', 'MATERIALS Amount'): "₱{:,.2f}",
+            ('Running Expenses', 'Lab %'): "{:.2%}",
+            ('Running Expenses', 'Labor Amount'): "₱{:,.2f}",
+            ('Running Expenses', 'ADMIN'): "₱{:,.2f}",
+            ('Running Expenses', 'SUBCON'): "₱{:,.2f}",
+            ('Running Expenses', 'Eqpt %'): "{:.2%}",
+            ('Running Expenses', 'EQPT Amount'): "₱{:,.2f}",
+            ('Running Expenses', 'Total %'): "{:.2%}",
+            ('Running Expenses', 'TOTAL Amount'): "₱{:,.2f}",
+        })
+        
+        st.dataframe(styled_df, hide_index=True)
 
-#==================================================================================
+        col_dl1, col_dl2 = st.columns([1, 4])
+        
+        export_df = final_df.copy()
+        export_df.columns = ['_'.join(col).strip() for col in export_df.columns.values]
+        
+        csv_summary = export_df.to_csv(index=False).encode('utf-8')
+        col_dl1.download_button(
+            label="📥 Download Summary (CSV)",
+            data=csv_summary,
+            file_name=f"project_financial_summary_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            key="download_financial_summary_csv"
+        )
+
+    render_office_manager_dashboard(conn)
+    
 # --- ROLE 5: ACCOUNTING ---
 elif role == "Accounting":
 
