@@ -8337,343 +8337,362 @@ elif role == "Accounting":
             render_bank_loans_dashboard(conn)
 
                   
-#==================================================================================
-# --- ROLE 6: ADMIN VIEW ALL ---
+# --- ROLE 6: ADMIN VIEW ALL (OPTIMIZED) ---
 elif role == "Admin View All":
     st.subheader("🛡️ Admin Dashboard & Analytics")
 
-    tab_settings, tab_reports, tab_payables = st.tabs(["⚙️ Master Database & Settings", "📊 Project Approved Reports", "💸 Accounts Payable"])
-    
-    with tab_settings:
-        st.write("### ⚙️ Admin Settings & Configuration")
+    @st.fragment
+    def render_admin_dashboard(conn):
+        c = conn.cursor()
+
+        tab_settings, tab_reports, tab_payables = st.tabs([
+            "⚙️ Master Database & Settings", 
+            "📊 Project Approved Reports", 
+            "💸 Accounts Payable"
+        ])
         
-        with st.expander("👥 Manage System Users"):
-            st.write("#### 👤 Add, Edit, or Remove Users")
-            users_df = pd.read_sql_query("SELECT id, username, email, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users", conn)
+        # ----------------------------------------------------
+        # TAB 1: MASTER DATABASE & SETTINGS
+        # ----------------------------------------------------
+        with tab_settings:
+            st.write("### ⚙️ Admin Settings & Configuration")
             
-            role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Engineering", "Accounting", "HRIS / Payroll", "Motorpool", "Admin View All"]
-            yes_no_options = ["Yes", "No"]
-            
-            edited_users = st.data_editor(
-                users_df,
-                num_rows="dynamic",
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "id": None, 
-                    "username": st.column_config.TextColumn("Username", required=True),
-                    "email": st.column_config.TextColumn("Email Address", help="User's email for workflow alerts"),
-                    "password": st.column_config.TextColumn("Password", required=True),
-                    "role1": st.column_config.SelectboxColumn("Role 1", options=role_options),
-                    "role2": st.column_config.SelectboxColumn("Role 2", options=role_options),
-                    "role3": st.column_config.SelectboxColumn("Role 3", options=role_options),
-                    "role4": st.column_config.SelectboxColumn("Role 4", options=role_options),
-                    "role5": st.column_config.SelectboxColumn("Role 5", options=role_options),
-                    "role6": st.column_config.SelectboxColumn("Role 6", options=role_options),
-                    "status": st.column_config.SelectboxColumn("Status", options=["Active", "Inactive"], default="Active"),
-                    "can_add_act": st.column_config.SelectboxColumn("Can Add Act?", options=yes_no_options, default="No"),
-                    "can_add_item": st.column_config.SelectboxColumn("Can Add Item?", options=yes_no_options, default="No")
-                }
-            )
-            
-            if st.button("💾 Save User Changes", type="primary"):
-                c.execute("DELETE FROM users")
-                for _, row in edited_users.iterrows():
-                    username_val = str(row['username']).strip() if pd.notnull(row['username']) else ""
-                    if username_val:
-                        email_val = str(row.get('email', '')).strip() if pd.notnull(row.get('email')) else ''
-                        r1 = str(row.get('role1', '')) if pd.notnull(row.get('role1')) else ''
-                        r2 = str(row.get('role2', '')) if pd.notnull(row.get('role2')) else ''
-                        r3 = str(row.get('role3', '')) if pd.notnull(row.get('role3')) else ''
-                        r4 = str(row.get('role4', '')) if pd.notnull(row.get('role4')) else ''
-                        r5 = str(row.get('role5', '')) if pd.notnull(row.get('role5')) else ''
-                        r6 = str(row.get('role6', '')) if pd.notnull(row.get('role6')) else ''
-                        status = str(row.get('status', 'Active')) if pd.notnull(row.get('status')) else 'Active'
-                        can_add_act = str(row.get('can_add_act', 'No')) if pd.notnull(row.get('can_add_act')) else 'No'
-                        can_add_item = str(row.get('can_add_item', 'No')) if pd.notnull(row.get('can_add_item')) else 'No'
-                        pwd = str(row.get('password', '1234')) if pd.notnull(row.get('password')) else '1234'
-                        
-                        c.execute("""
-                            INSERT INTO users (username, email, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            username_val, email_val, pwd, 
-                            r1, r2, r3, r4, r5, r6, status, can_add_act, can_add_item
-                        ))
-                conn.commit()
-                st.success("User database updated successfully!")
-                st.rerun()
-
-        with st.expander("➕ Add New Project"):
-            new_proj = st.text_input("Project Name")
-            if st.button("Save Project"):
-                if new_proj.strip():
-                    c.execute("INSERT OR IGNORE INTO projects (project_name) VALUES (?)", (new_proj.strip(),))
-                    conn.commit()
-                    st.success(f"Project '{new_proj}' added!")
-                    st.rerun()
-
-        with st.expander("🏗️ Manage Project Activities"):
-            st.write("#### 📝 Edit & Manage Project Activities")
-            projects_list = [p[0] for p in c.execute("SELECT project_name FROM projects").fetchall()]
-            if not projects_list:
-                projects_list = ["No projects available"]
-            sel_proj_act = st.selectbox("Select Project for Activity", projects_list, key="sel_proj_editable")
-            
-            if sel_proj_act and sel_proj_act != "No projects available":
-                proj_row = c.execute("SELECT id FROM projects WHERE project_name = ?", (sel_proj_act,)).fetchone()
-                if proj_row:
-                    project_id = proj_row[0]
-                    
-                    st.markdown("---")
-                    st.write(f"#### 📋 Editable Activity List for: *{sel_proj_act}*")
-                    
-                    acts_df = pd.read_sql_query("""
-                        SELECT 
-                            id,
-                            activity_name AS 'Activity Name', 
-                            qty AS 'Qty',
-                            unit AS 'Unit',
-                            contract_amount AS 'Contract Amount'
-                        FROM activities 
-                        WHERE project_id = ? 
-                        ORDER BY id ASC
-                    """, conn, params=(project_id,))
-                    
-                    if not acts_df.empty:
-                        edited_acts_df = st.data_editor(
-                            acts_df,
-                            width="stretch",
-                            hide_index=True,
-                            num_rows="dynamic",
-                            column_config={
-                                "id": None,
-                                "Qty": st.column_config.NumberColumn("Qty", min_value=0.0, step=0.01, format="%.2f"),
-                                "Contract Amount": st.column_config.NumberColumn("Contract Amount", min_value=0.0, step=100.0, format="₱%.2f")
-                            }
-                        )
-                        
-                        col_save, col_metric = st.columns([1, 2])
-                        if col_save.button("💾 Save Table Changes", type="primary"):
-                            for _, row in edited_acts_df.iterrows():
-                                act_id = row['id']
-                                act_name = str(row['Activity Name']).strip() if pd.notnull(row['Activity Name']) else ""
-                                act_qty = float(row['Qty']) if pd.notnull(row['Qty']) else 1.0
-                                act_unit = str(row['Unit']).strip() if pd.notnull(row['Unit']) else "lot"
-                                act_amt = float(row['Contract Amount']) if pd.notnull(row['Contract Amount']) else 0.0
-                                
-                                if pd.notnull(act_id):
-                                    c.execute("""
-                                        UPDATE activities 
-                                        SET activity_name = ?, qty = ?, unit = ?, contract_amount = ?
-                                        WHERE id = ?
-                                    """, (act_name, act_qty, act_unit, act_amt, act_id))
-                                elif act_name:
-                                    c.execute("""
-                                        INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount)
-                                        VALUES (?, ?, ?, ?, ?)
-                                    """, (project_id, act_name, act_qty, act_unit, act_amt))
+            with st.expander("👥 Manage System Users"):
+                users_df = pd.read_sql_query("SELECT id, username, email, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item FROM users", conn)
+                
+                role_options = ["", "Requisitor", "Purchaser", "Approver", "Office Manager", "Engineering", "Accounting", "HRIS / Payroll", "Motorpool", "Admin View All"]
+                yes_no_options = ["Yes", "No"]
+                
+                edited_users = st.data_editor(
+                    users_df,
+                    num_rows="dynamic",
+                    hide_index=True,
+                    column_config={
+                        "id": None, 
+                        "username": st.column_config.TextColumn("Username", required=True),
+                        "email": st.column_config.TextColumn("Email Address", help="User's email for workflow alerts"),
+                        "password": st.column_config.TextColumn("Password", required=True),
+                        "role1": st.column_config.SelectboxColumn("Role 1", options=role_options),
+                        "role2": st.column_config.SelectboxColumn("Role 2", options=role_options),
+                        "role3": st.column_config.SelectboxColumn("Role 3", options=role_options),
+                        "role4": st.column_config.SelectboxColumn("Role 4", options=role_options),
+                        "role5": st.column_config.SelectboxColumn("Role 5", options=role_options),
+                        "role6": st.column_config.SelectboxColumn("Role 6", options=role_options),
+                        "status": st.column_config.SelectboxColumn("Status", options=["Active", "Inactive"], default="Active"),
+                        "can_add_act": st.column_config.SelectboxColumn("Can Add Act?", options=yes_no_options, default="No"),
+                        "can_add_item": st.column_config.SelectboxColumn("Can Add Item?", options=yes_no_options, default="No")
+                    },
+                    key="admin_users_editor"
+                )
+                
+                if st.button("💾 Save User Changes", type="primary", key="btn_save_users"):
+                    c.execute("DELETE FROM users")
+                    for _, row in edited_users.iterrows():
+                        username_val = str(row['username']).strip() if pd.notnull(row['username']) else ""
+                        if username_val:
+                            email_val = str(row.get('email', '')).strip() if pd.notnull(row.get('email')) else ''
+                            r1 = str(row.get('role1', '')) if pd.notnull(row.get('role1')) else ''
+                            r2 = str(row.get('role2', '')) if pd.notnull(row.get('role2')) else ''
+                            r3 = str(row.get('role3', '')) if pd.notnull(row.get('role3')) else ''
+                            r4 = str(row.get('role4', '')) if pd.notnull(row.get('role4')) else ''
+                            r5 = str(row.get('role5', '')) if pd.notnull(row.get('role5')) else ''
+                            r6 = str(row.get('role6', '')) if pd.notnull(row.get('role6')) else ''
+                            status = str(row.get('status', 'Active')) if pd.notnull(row.get('status')) else 'Active'
+                            can_add_act = str(row.get('can_add_act', 'No')) if pd.notnull(row.get('can_add_act')) else 'No'
+                            can_add_item = str(row.get('can_add_item', 'No')) if pd.notnull(row.get('can_add_item')) else 'No'
+                            pwd = str(row.get('password', '1234')) if pd.notnull(row.get('password')) else '1234'
                             
-                            original_ids = acts_df['id'].dropna().tolist()
-                            current_ids = edited_acts_df['id'].dropna().tolist()
-                            deleted_ids = [old_id for old_id in original_ids if old_id not in current_ids]
-                            for d_id in deleted_ids:
-                                c.execute("DELETE FROM activities WHERE id = ?", (d_id,))
-                            
-                            conn.commit()
-                            st.success("Changes successfully saved to database!")
-                            st.rerun()
-                            
-                        acts_df['Implementing Amount'] = acts_df['Contract Amount'] * 0.42
-                        total_contract = acts_df['Contract Amount'].sum()
-                        total_implementing = acts_df['Implementing Amount'].sum()
-                        col_metric.markdown(f"**Total Contract:** ₱{total_contract:,.2f} | **Total Implementing (42%):** ₱{total_implementing:,.2f}")
-                    else:
-                        st.info("No activities registered yet for this project.")
-                    
-                    st.markdown("---")
-                    st.write("#### ➕ Add New Activity")
-                    ac1, ac2, ac3, ac4 = st.columns([3, 1, 1, 2])
-                    new_act = ac1.text_input("Activity Name / Description", key="new_act_name")
-                    new_qty = ac2.number_input("Qty", min_value=0.0, value=1.0, step=1.0, key="new_act_qty")
-                    new_unit = ac3.text_input("Unit", value="lot", key="new_act_unit")
-                    new_amt = ac4.number_input("Contract Amount", min_value=0.0, step=100.0, key="new_act_amt")
-                    
-                    if st.button("➕ Add Activity", type="primary", key="btn_add_activity"):
-                        if new_act.strip():
                             c.execute("""
-                                INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount)
-                                VALUES (?, ?, ?, ?, ?)
-                            """, (project_id, new_act.strip(), new_qty, new_unit.strip(), new_amt))
-                            conn.commit()
-                            st.success(f"Activity '{new_act}' added to project '{sel_proj_act}'!")
-                            st.rerun()
-                        else:
-                            st.warning("Please enter an activity name.")
-
-        with st.expander("📦 Manage Materials Master List"):
-            st.write("#### 📝 Edit & Manage Materials")
-            mats_df = pd.read_sql_query("SELECT item_no, description, unit, category FROM materials", conn)
-            edited_mats = st.data_editor(
-                mats_df,
-                num_rows="dynamic",
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "item_no": st.column_config.TextColumn("Item No.", required=True),
-                    "description": st.column_config.TextColumn("Description", required=True),
-                    "unit": st.column_config.TextColumn("Unit", default="PCS"),
-                    "category": st.column_config.SelectboxColumn("Category", options=["Direct Materials", "Equipment & Rental", "Tools & Consumables", "Fuel & Lubricants", "Subcontract & Services"], default="Direct Materials")
-                }
-            )
-            if st.button("💾 Save Materials List", type="primary"):
-                c.execute("DELETE FROM materials")
-                for _, r in edited_mats.iterrows():
-                    item_no = str(r['item_no']).strip() if pd.notnull(r['item_no']) else ""
-                    desc = str(r['description']).strip() if pd.notnull(r['description']) else ""
-                    unit = str(r['unit']).strip() if pd.notnull(r['unit']) else "PCS"
-                    cat = str(r['category']).strip() if pd.notnull(r['category']) else "Direct Materials"
-                    if item_no and desc:
-                        c.execute("INSERT INTO materials (item_no, description, unit, category) VALUES (?, ?, ?, ?)", (item_no, desc, unit, cat))
-                conn.commit()
-                st.success("Materials list updated successfully!")
-                st.rerun()
-
-        with st.expander("🏬 Manage Suppliers Master List"):
-            st.write("#### 📝 Edit & Manage Suppliers")
-            
-            # 1. Safe DB migration to ensure the column exists
-            try:
-                c.execute("ALTER TABLE suppliers ADD COLUMN requires_advance_pdc TEXT DEFAULT 'No'")
-                conn.commit()
-            except Exception:
-                pass  # Column already exists
-        
-            # 2. Query suppliers including the new requires_advance_pdc field
-            sups_df = pd.read_sql_query(
-                "SELECT id, supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days, requires_advance_pdc FROM suppliers", 
-                conn
-            )
-            
-            # Fill any null values with 'No'
-            if 'requires_advance_pdc' in sups_df.columns:
-                sups_df['requires_advance_pdc'] = sups_df['requires_advance_pdc'].fillna('No')
-        
-            # 3. Data Editor with Selectbox configuration
-            edited_sups = st.data_editor(
-                sups_df,
-                num_rows="dynamic",
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "id": None,
-                    "requires_advance_pdc": st.column_config.SelectboxColumn(
-                        "Requires Advance PDC?",
-                        help="If 'Yes', POs from this supplier can be paid via Advance PDC in Accounting before delivery.",
-                        options=["No", "Yes"],
-                        required=True,
-                        default="No"
-                    )
-                }
-            )
-        
-            # 4. Save updated suppliers list
-            if st.button("💾 Save Suppliers List", type="primary"):
-                c.execute("DELETE FROM suppliers")
-                for _, r in edited_sups.iterrows():
-                    s_name = str(r['supplier_name']).strip() if pd.notnull(r['supplier_name']) else ""
-                    if s_name:
-                        c.execute("""
-                            INSERT INTO suppliers (supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days, requires_advance_pdc)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            s_name,
-                            str(r.get('location', '') or ''),
-                            str(r.get('contact_person', '') or ''),
-                            str(r.get('contact_number', '') or ''),
-                            str(r.get('tin_number', '') or ''),
-                            str(r.get('vat_type', '') or 'VAT Registered'),
-                            int(r.get('terms_days', 0) or 0),
-                            str(r.get('requires_advance_pdc', 'No') or 'No')
-                        ))
-                conn.commit()
-                st.success("Suppliers list updated!")
-                st.rerun()
-
-        with st.expander("✍️ Manage Signatories"):
-            sigs_df = pd.read_sql_query("SELECT id, name, role, signature_path FROM signatories", conn)
-            edited_sigs = st.data_editor(sigs_df, num_rows="dynamic", width="stretch", hide_index=True, column_config={"id": None})
-            if st.button("💾 Save Signatories"):
-                c.execute("DELETE FROM signatories")
-                for _, r in edited_sigs.iterrows():
-                    if pd.notnull(r['name']) and str(r['name']).strip():
-                        c.execute("INSERT INTO signatories (name, role, signature_path) VALUES (?, ?, ?)",
-                                  (str(r['name']).strip(), str(r['role']).strip(), str(r['signature_path']).strip()))
-                conn.commit()
-                st.success("Signatories updated!")
-                st.rerun()
-
-    with tab_reports:
-        st.write("### 📊 Comprehensive Project Reports")
-        all_reqs = pd.read_sql_query("""
-            SELECT id, timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, requester_name, supplier, pono, status, received_status, payment_status
-            FROM requests ORDER BY id DESC
-        """, conn)
-        st.dataframe(all_reqs, width="stretch", hide_index=True)
-        
-        csv_reqs = all_reqs.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Export All Request Records (CSV)",
-            data=csv_reqs,
-            file_name=f"all_requests_report_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
-
-    with tab_payables:
-        st.write("### 💸 Master Accounts Payable Overview")
-        del_ap = pd.read_sql_query("""
-            SELECT id, pono, dr_number, supplier, project_name, total_amount, received_date, apv_number, cv_number, payment_status, payment_method
-            FROM deliveries ORDER BY id DESC
-        """, conn)
-        st.dataframe(del_ap.style.format({"total_amount": "₱{:,.2f}"}), width="stretch", hide_index=True)
-        
-        csv_ap = del_ap.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Export Accounts Payable Report (CSV)",
-            data=csv_ap,
-            file_name=f"accounts_payable_report_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
-    #================================================================
-    st.markdown("---")
-    with st.expander("🚨 ADMIN TOOL: Complete Operational Reset"):
-        st.error("⚠️ **WARNING:** This will permanently delete all requests, deliveries, inventory transactions, and journal entries!")
-        
-        confirm_wipe = st.checkbox("I understand this will reset all operational data back to zero.")
-        
-        if confirm_wipe:
-            if st.button("🔥 WIPE ALL OPERATIONAL DATA & RESET IDs", type="primary"):
-                try:
-                    # Clear operational transaction tables
-                    c.execute("DELETE FROM journal_entries")
-                    c.execute("DELETE FROM deliveries")
-                    c.execute("DELETE FROM inventory_ledger")
-                    c.execute("DELETE FROM requests")
-                    c.execute("DELETE FROM floating_checks")
-                    c.execute("DELETE FROM bank_reconciliations")
-                    
-                    # Reset SQLite auto-increment counters back to 1
-                    c.execute("""
-                        DELETE FROM sqlite_sequence 
-                        WHERE name IN ('journal_entries', 'deliveries', 'inventory_ledger', 'requests', 'floating_checks', 'bank_reconciliations')
-                    """)
-                    
+                                INSERT INTO users (username, email, password, role1, role2, role3, role4, role5, role6, status, can_add_act, can_add_item)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                username_val, email_val, pwd, 
+                                r1, r2, r3, r4, r5, r6, status, can_add_act, can_add_item
+                            ))
                     conn.commit()
-                    st.success("🎉 All operational tables cleared and ID sequences reset to 1!")
+                    st.cache_data.clear()
+                    st.success("User database updated successfully!")
                     st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error during database reset: {e}")
-    #================================================================
+
+            with st.expander("➕ Add New Project"):
+                new_proj = st.text_input("Project Name", key="admin_new_proj_input")
+                if st.button("Save Project", key="btn_save_new_proj"):
+                    if new_proj.strip():
+                        c.execute("INSERT OR IGNORE INTO projects (project_name) VALUES (?)", (new_proj.strip(),))
+                        conn.commit()
+                        st.cache_data.clear()
+                        st.success(f"Project '{new_proj}' added!")
+                        st.rerun()
+
+            with st.expander("🏗️ Manage Project Activities"):
+                projects_list = [p[0] for p in c.execute("SELECT project_name FROM projects").fetchall()]
+                if not projects_list:
+                    projects_list = ["No projects available"]
+                sel_proj_act = st.selectbox("Select Project for Activity", projects_list, key="sel_proj_editable")
+                
+                if sel_proj_act and sel_proj_act != "No projects available":
+                    proj_row = c.execute("SELECT id FROM projects WHERE project_name = ?", (sel_proj_act,)).fetchone()
+                    if proj_row:
+                        project_id = proj_row[0]
+                        
+                        st.markdown("---")
+                        st.write(f"#### 📋 Editable Activity List for: *{sel_proj_act}*")
+                        
+                        acts_df = pd.read_sql_query("""
+                            SELECT 
+                                id,
+                                activity_name AS 'Activity Name', 
+                                qty AS 'Qty',
+                                unit AS 'Unit',
+                                contract_amount AS 'Contract Amount'
+                            FROM activities 
+                            WHERE project_id = ? 
+                            ORDER BY id ASC
+                        """, conn, params=(project_id,))
+                        
+                        if not acts_df.empty:
+                            edited_acts_df = st.data_editor(
+                                acts_df,
+                                hide_index=True,
+                                num_rows="dynamic",
+                                column_config={
+                                    "id": None,
+                                    "Qty": st.column_config.NumberColumn("Qty", min_value=0.0, step=0.01, format="%.2f"),
+                                    "Contract Amount": st.column_config.NumberColumn("Contract Amount", min_value=0.0, step=100.0, format="₱%.2f")
+                                },
+                                key="admin_acts_editor"
+                            )
+                            
+                            col_save, col_metric = st.columns([1, 2])
+                            if col_save.button("💾 Save Table Changes", type="primary", key="btn_save_acts_table"):
+                                for _, row in edited_acts_df.iterrows():
+                                    act_id = row['id']
+                                    act_name = str(row['Activity Name']).strip() if pd.notnull(row['Activity Name']) else ""
+                                    act_qty = float(row['Qty']) if pd.notnull(row['Qty']) else 1.0
+                                    act_unit = str(row['Unit']).strip() if pd.notnull(row['Unit']) else "lot"
+                                    act_amt = float(row['Contract Amount']) if pd.notnull(row['Contract Amount']) else 0.0
+                                    
+                                    if pd.notnull(act_id):
+                                        c.execute("""
+                                            UPDATE activities 
+                                            SET activity_name = ?, qty = ?, unit = ?, contract_amount = ?
+                                            WHERE id = ?
+                                        """, (act_name, act_qty, act_unit, act_amt, act_id))
+                                    elif act_name:
+                                        c.execute("""
+                                            INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount)
+                                            VALUES (?, ?, ?, ?, ?)
+                                        """, (project_id, act_name, act_qty, act_unit, act_amt))
+                                
+                                original_ids = acts_df['id'].dropna().tolist()
+                                current_ids = edited_acts_df['id'].dropna().tolist()
+                                deleted_ids = [old_id for old_id in original_ids if old_id not in current_ids]
+                                for d_id in deleted_ids:
+                                    c.execute("DELETE FROM activities WHERE id = ?", (d_id,))
+                                
+                                conn.commit()
+                                st.cache_data.clear()
+                                st.success("Changes successfully saved to database!")
+                                st.rerun()
+                                
+                            acts_df['Implementing Amount'] = acts_df['Contract Amount'] * 0.42
+                            total_contract = acts_df['Contract Amount'].sum()
+                            total_implementing = acts_df['Implementing Amount'].sum()
+                            col_metric.markdown(f"**Total Contract:** ₱{total_contract:,.2f} | **Total Implementing (42%):** ₱{total_implementing:,.2f}")
+                        else:
+                            st.info("No activities registered yet for this project.")
+                        
+                        st.markdown("---")
+                        st.write("#### ➕ Add New Activity")
+                        ac1, ac2, ac3, ac4 = st.columns([3, 1, 1, 2])
+                        new_act = ac1.text_input("Activity Name / Description", key="new_act_name")
+                        new_qty = ac2.number_input("Qty", min_value=0.0, value=1.0, step=1.0, key="new_act_qty")
+                        new_unit = ac3.text_input("Unit", value="lot", key="new_act_unit")
+                        new_amt = ac4.number_input("Contract Amount", min_value=0.0, step=100.0, key="new_act_amt")
+                        
+                        if st.button("➕ Add Activity", type="primary", key="btn_add_activity"):
+                            if new_act.strip():
+                                c.execute("""
+                                    INSERT INTO activities (project_id, activity_name, qty, unit, contract_amount)
+                                    VALUES (?, ?, ?, ?, ?)
+                                """, (project_id, new_act.strip(), new_qty, new_unit.strip(), new_amt))
+                                conn.commit()
+                                st.cache_data.clear()
+                                st.success(f"Activity '{new_act}' added to project '{sel_proj_act}'!")
+                                st.rerun()
+                            else:
+                                st.warning("Please enter an activity name.")
+
+            with st.expander("📦 Manage Materials Master List"):
+                mats_df = pd.read_sql_query("SELECT item_no, description, unit, category FROM materials", conn)
+                edited_mats = st.data_editor(
+                    mats_df,
+                    num_rows="dynamic",
+                    hide_index=True,
+                    column_config={
+                        "item_no": st.column_config.TextColumn("Item No.", required=True),
+                        "description": st.column_config.TextColumn("Description", required=True),
+                        "unit": st.column_config.TextColumn("Unit", default="PCS"),
+                        "category": st.column_config.SelectboxColumn("Category", options=["Direct Materials", "Equipment & Rental", "Tools & Consumables", "Fuel & Lubricants", "Subcontract & Services"], default="Direct Materials")
+                    },
+                    key="admin_mats_editor"
+                )
+                if st.button("💾 Save Materials List", type="primary", key="btn_save_mats"):
+                    c.execute("DELETE FROM materials")
+                    for _, r in edited_mats.iterrows():
+                        item_no = str(r['item_no']).strip() if pd.notnull(r['item_no']) else ""
+                        desc = str(r['description']).strip() if pd.notnull(r['description']) else ""
+                        unit = str(r['unit']).strip() if pd.notnull(r['unit']) else "PCS"
+                        cat = str(r['category']).strip() if pd.notnull(r['category']) else "Direct Materials"
+                        if item_no and desc:
+                            c.execute("INSERT INTO materials (item_no, description, unit, category) VALUES (?, ?, ?, ?)", (item_no, desc, unit, cat))
+                    conn.commit()
+                    st.cache_data.clear()
+                    st.success("Materials list updated successfully!")
+                    st.rerun()
+
+            with st.expander("🏬 Manage Suppliers Master List"):
+                try:
+                    c.execute("ALTER TABLE suppliers ADD COLUMN requires_advance_pdc TEXT DEFAULT 'No'")
+                    conn.commit()
+                except Exception:
+                    pass 
+            
+                sups_df = pd.read_sql_query(
+                    "SELECT id, supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days, requires_advance_pdc FROM suppliers", 
+                    conn
+                )
+                
+                if 'requires_advance_pdc' in sups_df.columns:
+                    sups_df['requires_advance_pdc'] = sups_df['requires_advance_pdc'].fillna('No')
+            
+                edited_sups = st.data_editor(
+                    sups_df,
+                    num_rows="dynamic",
+                    hide_index=True,
+                    column_config={
+                        "id": None,
+                        "requires_advance_pdc": st.column_config.SelectboxColumn(
+                            "Requires Advance PDC?",
+                            help="If 'Yes', POs from this supplier can be paid via Advance PDC in Accounting before delivery.",
+                            options=["No", "Yes"],
+                            required=True,
+                            default="No"
+                        )
+                    },
+                    key="admin_sups_editor"
+                )
+            
+                if st.button("💾 Save Suppliers List", type="primary", key="btn_save_sups"):
+                    c.execute("DELETE FROM suppliers")
+                    for _, r in edited_sups.iterrows():
+                        s_name = str(r['supplier_name']).strip() if pd.notnull(r['supplier_name']) else ""
+                        if s_name:
+                            c.execute("""
+                                INSERT INTO suppliers (supplier_name, location, contact_person, contact_number, tin_number, vat_type, terms_days, requires_advance_pdc)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                s_name,
+                                str(r.get('location', '') or ''),
+                                str(r.get('contact_person', '') or ''),
+                                str(r.get('contact_number', '') or ''),
+                                str(r.get('tin_number', '') or ''),
+                                str(r.get('vat_type', '') or 'VAT Registered'),
+                                int(r.get('terms_days', 0) or 0),
+                                str(r.get('requires_advance_pdc', 'No') or 'No')
+                            ))
+                    conn.commit()
+                    st.cache_data.clear()
+                    st.success("Suppliers list updated!")
+                    st.rerun()
+
+            with st.expander("✍️ Manage Signatories"):
+                sigs_df = pd.read_sql_query("SELECT id, name, role, signature_path FROM signatories", conn)
+                edited_sigs = st.data_editor(sigs_df, num_rows="dynamic", hide_index=True, column_config={"id": None}, key="admin_sigs_editor")
+                if st.button("💾 Save Signatories", key="btn_save_sigs"):
+                    c.execute("DELETE FROM signatories")
+                    for _, r in edited_sigs.iterrows():
+                        if pd.notnull(r['name']) and str(r['name']).strip():
+                            c.execute("INSERT INTO signatories (name, role, signature_path) VALUES (?, ?, ?)",
+                                      (str(r['name']).strip(), str(r['role']).strip(), str(r['signature_path']).strip()))
+                    conn.commit()
+                    st.cache_data.clear()
+                    st.success("Signatories updated!")
+                    st.rerun()
+
+        # ----------------------------------------------------
+        # TAB 2: PROJECT APPROVED REPORTS
+        # ----------------------------------------------------
+        with tab_reports:
+            st.write("### 📊 Comprehensive Project Reports")
+            all_reqs = pd.read_sql_query("""
+                SELECT id, timestamp, project_name, activity, item_no, description, category, qty, unit, price, amount, requester_name, supplier, pono, status, received_status, payment_status
+                FROM requests ORDER BY id DESC
+            """, conn)
+            st.dataframe(all_reqs, hide_index=True)
+            
+            csv_reqs = all_reqs.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Export All Request Records (CSV)",
+                data=csv_reqs,
+                file_name=f"all_requests_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="download_all_reqs_csv"
+            )
+
+        # ----------------------------------------------------
+        # TAB 3: ACCOUNTS PAYABLE
+        # ----------------------------------------------------
+        with tab_payables:
+            st.write("### 💸 Master Accounts Payable Overview")
+            del_ap = pd.read_sql_query("""
+                SELECT id, pono, dr_number, supplier, project_name, total_amount, received_date, apv_number, cv_number, payment_status, payment_method
+                FROM deliveries ORDER BY id DESC
+            """, conn)
+            st.dataframe(del_ap.style.format({"total_amount": "₱{:,.2f}"}), hide_index=True)
+            
+            csv_ap = del_ap.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Export Accounts Payable Report (CSV)",
+                data=csv_ap,
+                file_name=f"accounts_payable_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="download_ap_report_csv"
+            )
+
+        # ----------------------------------------------------
+        # ADMIN OPERATIONAL RESET SECTION
+        # ----------------------------------------------------
+        st.markdown("---")
+        with st.expander("🚨 ADMIN TOOL: Complete Operational Reset"):
+            st.error("⚠️ **WARNING:** This will permanently delete all requests, deliveries, inventory transactions, and journal entries!")
+            
+            confirm_wipe = st.checkbox("I understand this will reset all operational data back to zero.", key="admin_confirm_wipe_checkbox")
+            
+            if confirm_wipe:
+                if st.button("🔥 WIPE ALL OPERATIONAL DATA & RESET IDs", type="primary", key="btn_wipe_all_data"):
+                    try:
+                        c.execute("DELETE FROM journal_entries")
+                        c.execute("DELETE FROM deliveries")
+                        c.execute("DELETE FROM inventory_ledger")
+                        c.execute("DELETE FROM requests")
+                        c.execute("DELETE FROM floating_checks")
+                        c.execute("DELETE FROM bank_reconciliations")
+                        
+                        c.execute("""
+                            DELETE FROM sqlite_sequence 
+                            WHERE name IN ('journal_entries', 'deliveries', 'inventory_ledger', 'requests', 'floating_checks', 'bank_reconciliations')
+                        """)
+                        
+                        conn.commit()
+                        st.cache_data.clear()
+                        st.success("🎉 All operational tables cleared and ID sequences reset to 1!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error during database reset: {e}")
+
+    render_admin_dashboard(conn)
+    
 #=================================================================================
 ### --- ROLE: ENGINEERING (Subcontractor Progress Billings & Rental Licenses) ---
 #=================================================================================
