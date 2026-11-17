@@ -6181,8 +6181,8 @@ if role == "Requisitor":
     with tab_receive:
         render_receive_tab(conn)
         
-# --- ROLE 2: PURCHASER ---
-elif role == "Purchaser":
+# --- ROLE 2: PURCHASER (OPTIMIZED) ---
+if role == "Purchaser":
     st.subheader("🛒 Purchaser Dashboard")
     
     tab_create_po, tab_receive, tab_ledger = st.tabs([
@@ -6191,11 +6191,14 @@ elif role == "Purchaser":
         "📊 Inventory Ledger & Issuance"
     ])
     
-    with tab_create_po:
+    # ----------------------------------------------------
+    # TAB 1: CREATE PURCHASE ORDERS (Wrapped in Fragment)
+    # ----------------------------------------------------
+    @st.fragment
+    def render_create_po_tab(conn):
         st.write("### 🛒 Batch Create P.O.")
         
-        if st.button("🔄 Refresh Pending Requests", key="btn_refresh_create_po"):
-            st.rerun()
+        c = conn.cursor()
         
         pending_df = pd.read_sql_query(
             "SELECT id, project_name, activity, item_no, description, qty, unit, price AS est_price, supplier FROM requests WHERE status = 'Pending Purchaser'", 
@@ -6204,10 +6207,9 @@ elif role == "Purchaser":
         
         last_po_query = "SELECT pono FROM requests WHERE pono IS NOT NULL AND pono != '' ORDER BY id DESC LIMIT 1"
         last_po_result = c.execute(last_po_query).fetchone()
-        
         last_po = last_po_result[0] if last_po_result else None
-        suggested_po = ""
         
+        suggested_po = ""
         if last_po:
             match = re.search(r'(\d+)$', last_po)
             if match:
@@ -6221,23 +6223,32 @@ elif role == "Purchaser":
         if pending_df.empty:
             st.info("No pending requests waiting for Purchasing.")
         else:
+            # OPTIMIZED: Fetch last purchase prices in ONE query instead of looping N queries
+            item_nos = tuple(pending_df['item_no'].unique())
+            last_prices_map = {}
+            if item_nos:
+                placeholders = ','._join(['?'] * len(item_nos)) if len(item_nos) > 1 else '?'
+                # Fallback format for single vs multiple item tuples
+                if len(item_nos) == 1:
+                    query_lp = "SELECT item_no, price FROM requests WHERE item_no = ? AND price > 0 AND status != 'Pending Purchaser' ORDER BY id DESC"
+                    rows_lp = c.execute(query_lp, (item_nos[0],)).fetchall()
+                else:
+                    query_lp = f"SELECT item_no, price FROM requests WHERE item_no IN ({placeholders}) AND price > 0 AND status != 'Pending Purchaser' ORDER BY id DESC"
+                    rows_lp = c.execute(query_lp, item_nos).fetchall()
+                
+                for im_no, pr in rows_lp:
+                    if im_no not in last_prices_map:
+                        last_prices_map[im_no] = pr
+
             last_prices = []
             default_confirmed_prices = []
             
             for _, row in pending_df.iterrows():
                 item_no = row['item_no']
                 est = row['est_price'] if pd.notnull(row['est_price']) else 0.0
-                
-                res = c.execute("""
-                    SELECT price FROM requests 
-                    WHERE item_no = ? AND price > 0 AND status != 'Pending Purchaser' 
-                    ORDER BY id DESC LIMIT 1
-                """, (item_no,)).fetchone()
-                
-                last_paid = res[0] if res else 0.0
+                last_paid = last_prices_map.get(item_no, 0.0)
                 last_prices.append(last_paid)
-                default_price = last_paid if last_paid > 0 else est
-                default_confirmed_prices.append(default_price)
+                default_confirmed_prices.append(last_paid if last_paid > 0 else est)
                 
             pending_df["Last Purchase Price"] = last_prices
             pending_df["Confirmed Price"] = default_confirmed_prices
@@ -6255,8 +6266,8 @@ elif role == "Purchaser":
                 if first_row_suggestion and first_row_suggestion in suppliers_master:
                     default_vendor_index = suppliers_master.index(first_row_suggestion)
             
-            selected_supplier = col1.selectbox("Select Supplier for this Order", suppliers_master, index=default_vendor_index)
-            po_number = col2.text_input("Enter P.O. Number", value=suggested_po)
+            selected_supplier = col1.selectbox("Select Supplier for this Order", suppliers_master, index=default_vendor_index, key="po_sup_select")
+            po_number = col2.text_input("Enter P.O. Number", value=suggested_po, key="po_num_input")
             
             if last_po:
                 col2.caption(f"💡 *Last used P.O. Number was:* **{last_po}**")
@@ -6272,7 +6283,6 @@ elif role == "Purchaser":
             
             edited_df = st.data_editor(
                 pending_df,
-                width="stretch",
                 hide_index=True,
                 column_config={
                     "Add to PO": st.column_config.CheckboxColumn("Add to PO", default=False),
@@ -6282,10 +6292,11 @@ elif role == "Purchaser":
                     "est_price": None,
                     "id": None, 
                 },
-                disabled=["project_name", "activity", "item_no", "description", "qty", "unit", "Suggested Supplier", "Last Purchase Price"] 
+                disabled=["project_name", "activity", "item_no", "description", "qty", "unit", "Suggested Supplier", "Last Purchase Price"],
+                key="po_data_editor"
             )
             
-            if st.button("✅ Submit Purchase Order", type="primary"):
+            if st.button("✅ Submit Purchase Order", type="primary", key="btn_submit_po"):
                 if not po_number.strip():
                     st.error("⚠️ Please enter a valid P.O. Number before submitting.")
                 elif selected_supplier == "No suppliers available":
@@ -6303,33 +6314,37 @@ elif role == "Purchaser":
                             total_amt = round(qty * final_price, 2)
                             
                             c.execute("""UPDATE requests 
-                                         SET supplier = ?, pono = ?, price = ?, amount = ?, status = 'Pending Approval'
-                                         WHERE id = ?""", 
-                                      (selected_supplier, po_number, final_price, total_amt, req_id))
+                                       SET supplier = ?, pono = ?, price = ?, amount = ?, status = 'Pending Approval'
+                                       WHERE id = ?""", 
+                                    (selected_supplier, po_number, final_price, total_amt, req_id))
                         
                         conn.commit()
                         st.success(f"Successfully created P.O. #{po_number} with {len(selected_items)} item(s)!")
                         st.rerun()
 
-    
-    with tab_receive:
+    with tab_create_po:
+        render_create_po_tab(conn)
+
+
+    # ----------------------------------------------------
+    # TAB 2: RECEIVE DELIVERIES (Wrapped in Fragment)
+    # ----------------------------------------------------
+    @st.fragment
+    def render_receive_deliveries_tab(conn):
         st.write("### 🚚 Record Supplier Deliveries")
         st.info("Log items that have arrived on-site (full or partial delivery) and upload attached Delivery Receipts (DR), Sales Invoices (SI), or Official Receipts (OR).")
 
-        # Database migration safeguard: ensures received_qty column exists
+        c = conn.cursor()
+
         try:
             c.execute("ALTER TABLE requests ADD COLUMN received_qty REAL DEFAULT 0.0")
             conn.commit()
         except Exception:
             pass
 
-        if st.button("🔄 Refresh Deliveries", key="btn_refresh_receive_deliveries"):
-            st.rerun()
-        
         if "receive_success_msg" in st.session_state:
             st.success(st.session_state.pop("receive_success_msg"))
 
-        # Fetch POs that have undelivered remaining quantities
         pending_recv_df = pd.read_sql_query("""
             SELECT 
                 pono AS 'PO Number', 
@@ -6349,7 +6364,6 @@ elif role == "Purchaser":
         if not pending_recv_df.empty:
             st.dataframe(
                 pending_recv_df.style.format({"Unreceived Value": "₱{:,.2f}"}), 
-                width="stretch", 
                 hide_index=True
             )
             
@@ -6359,14 +6373,12 @@ elif role == "Purchaser":
             recv_col1, recv_col2 = st.columns(2)
             po_to_receive = recv_col1.selectbox("Select PO Number", pending_recv_df['PO Number'].tolist(), key="select_po_to_receive")
             
-            # Document prefix selector and number input side-by-side
             sub_col1, sub_col2 = recv_col2.columns([1, 2])
             doc_prefix = sub_col1.selectbox("Type", ["DR", "CSI", "SI", "OR"], key="doc_type_prefix")
             raw_doc_no = sub_col2.text_input("Document No.", placeholder="e.g. 00001", key="doc_num_raw")
             
             dr_number = f"{doc_prefix}#{raw_doc_no}" if raw_doc_no else ""
             
-            # Fetch line items for the selected PO to handle partial delivery quantities
             po_items = c.execute("""
                 SELECT id, item_no, description, qty, COALESCE(received_qty, 0), price, unit 
                 FROM requests 
@@ -6429,14 +6441,12 @@ elif role == "Purchaser":
                     receipt_blob = uploaded_file.getvalue() if uploaded_file else None
                     file_name = uploaded_file.name if uploaded_file else None
                     
-                    # 1. Record delivery header with partial delivery total amount for APV
                     c.execute("""INSERT INTO deliveries 
-                                 (pono, supplier, project_name, dr_number, total_amount, received_date, receipt_image, file_name) 
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", 
-                              (po_to_receive, po_details['Supplier'], po_details['Project'], dr_number.strip(), 
-                               total_delivery_amount, current_time, receipt_blob, file_name))
+                               (pono, supplier, project_name, dr_number, total_amount, received_date, receipt_image, file_name) 
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", 
+                            (po_to_receive, po_details['Supplier'], po_details['Project'], dr_number.strip(), 
+                             total_delivery_amount, current_time, receipt_blob, file_name))
                     
-                    # 2. Update received items and update inventory ledger
                     all_completed = True
                     for req_id, item_info in received_inputs.items():
                         qty_today = item_info["qty_today"]
@@ -6451,16 +6461,16 @@ elif role == "Purchaser":
                                 VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, 'Completed')
                             """, (current_time, dr_number.strip(), item_info["desc"], qty_today, new_bal, po_details['Project'], f"Received via {dr_number.strip()} (PO #{po_to_receive})"))
                         
-                        if (item_info["prev_rec"] + qty_today) < item_info["ordered_qty"]:
-                            all_completed = False
+                            if (item_info["prev_rec"] + qty_today) < item_info["ordered_qty"]:
+                                all_completed = False
 
-                    # 3. Update overall PO status
                     po_status = 'Received' if all_completed else 'Partially Received'
                     c.execute("UPDATE requests SET received_status = ?, received_timestamp = ? WHERE pono = ?", 
                               (po_status, current_time, po_to_receive))
 
                     conn.commit()
                     st.session_state["receive_success_msg"] = f"✅ PO #{po_to_receive} delivery ({dr_number}) logged! Amount: ₱{total_delivery_amount:,.2f}. Updated inventory ledger & generated APV record."
+                    st.cache_data.clear()
                     st.rerun()
         else:
             st.success("🎉 No pending deliveries! All approved POs have been physically received.")
@@ -6485,7 +6495,6 @@ elif role == "Purchaser":
         if not history_df.empty:
             st.dataframe(
                 history_df[["PO Number", "Supplier", "Project", "DR / SI / OR No.", "Total Amount", "Date Received", "File Name"]].style.format({"Total Amount": "₱{:,.2f}"}),
-                width="stretch",
                 hide_index=True
             )
 
@@ -6517,25 +6526,27 @@ elif role == "Purchaser":
         else:
             st.info("No received deliveries recorded yet.")
 
-    #with tab_ledger:
-    #with tab_ledger:
-    with tab_ledger:
+    with tab_receive:
+        render_receive_deliveries_tab(conn)
+
+
+    # ----------------------------------------------------
+    # TAB 3: INVENTORY LEDGER & ISSUANCE (Wrapped in Fragment)
+    # ----------------------------------------------------
+    @st.fragment
+    def render_inventory_ledger_tab(conn):
         st.write("### 🚚 Issue Materials to Site (Qty Out)")
         
-        if st.button("🔄 Refresh Ledger Data", key="btn_refresh_inventory_ledger"):
-            st.rerun()
-        
-        # 1. Fetch available items in stock
+        c = conn.cursor()
+
         items_db = c.execute("SELECT DISTINCT item_description FROM inventory_ledger WHERE item_description IS NOT NULL ORDER BY item_description ASC").fetchall()
         item_list = [i[0] for i in items_db] if items_db else []
 
-        # 2. Fetch project list from database for the Destination dropdown
         try:
             db_projects = [r[0] for r in c.execute("SELECT project_name FROM projects WHERE project_name IS NOT NULL ORDER BY project_name ASC").fetchall() if r[0]]
         except Exception:
             db_projects = []
 
-        # Default fallback list matching your active projects
         default_projects = [
             "LAZADA NEW - WAREHOUSE 2",
             "MOTORPOOL",
@@ -6544,24 +6555,18 @@ elif role == "Purchaser":
             "PASEO APARTMENT"
         ]
 
-        # Combine database projects with default fallback list without duplicates
         project_options = list(dict.fromkeys(db_projects + default_projects))
 
         if item_list:
             col1, col2 = st.columns(2)
             
-            # SELECT ITEM DROPDOWN
             selected_item = col1.selectbox("Select Item", item_list, key="dispatch_selected_item")
-            
-            # DYNAMIC STOCK RE-QUERY
             current_stock = get_latest_item_balance(c, selected_item)
             col1.caption(f"📦 Current Stock Available: **{current_stock:,.2f}**")
             
-            # AUTO-GENERATED MIF REFERENCE
             next_mif = get_next_mif_number(c)
             mif_ref = col1.text_input("MIF / Dispatch Ref No.", value=next_mif, key="dispatch_mif_ref")
             
-            # QUANTITY INPUT
             qty_to_issue = col2.number_input(
                 "Qty Out", 
                 min_value=0.10, 
@@ -6571,13 +6576,9 @@ elif role == "Purchaser":
                 key="dispatch_qty_out"
             )
 
-            # DESTINATION SITE DROPDOWN (Replaced text_input)
             site_location = col2.selectbox("Destination Site / Location", project_options, key="dispatch_site_location")
-            
-            # REMARKS
             issuance_remarks = st.text_input("Remarks", placeholder="e.g. Dispatched via Flatbed Truck 1", key="dispatch_remarks")
             
-            # SUBMIT DISPATCH
             if st.button("🚀 Confirm Material Dispatch", type="primary", key="btn_confirm_dispatch"):
                 if current_stock < qty_to_issue:
                     st.error(f"⚠️ Insufficient stock available! Available balance is {current_stock:,.2f}.")
@@ -6622,7 +6623,6 @@ elif role == "Purchaser":
                     "Qty Out": "{:,.2f}",
                     "Balance": "{:,.2f}"
                 }),
-                width="stretch",
                 hide_index=True
             )
             
@@ -6636,10 +6636,16 @@ elif role == "Purchaser":
         else:
             st.info("Inventory ledger is currently empty.")
 
+    with tab_ledger:
+        render_inventory_ledger_tab(conn)
+
+
+    # ----------------------------------------------------
+    # BOTTOM SECTIONS: REJECTED & APPROVED POs FOR PRINTING
+    # ----------------------------------------------------
     st.markdown("---")
     st.subheader("⚠️ Rejected Purchase Orders (Action Required)")
 
-    # Fetch rejected POs and include the rejection_reason column
     rejected_pos = c.execute("""
         SELECT pono, supplier, project_name, rejection_reason
         FROM requests 
@@ -6667,7 +6673,6 @@ elif role == "Purchaser":
                     po_items_df, 
                     disabled=["id", "item_no", "description", "qty", "unit", "amount"],
                     hide_index=True,
-                    width="stretch",
                     column_config={"id": None},
                     key=f"edit_price_{pono}"
                 )
@@ -6719,7 +6724,7 @@ elif role == "Purchaser":
             )
     elif not approved_pos:
         st.info("No approved purchase orders currently available for printing.")
-#=================================================================================
+        
 # --- ROLE 3: APPROVER ---
 elif role == "Approver":
     st.subheader("✅ Approver Dashboard (Leizel Cabunilas)")
