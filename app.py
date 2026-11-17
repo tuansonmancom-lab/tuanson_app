@@ -1290,7 +1290,7 @@ def render_engineering_weather_tab(conn, c):
             WHERE log_date BETWEEN ? AND ? AND project_site = ?
             ORDER BY log_date ASC, log_time ASC
         """
-        df_logs = pd.read_sql_query(query, conn, params=[start_str, end_str, site_filter])
+        df_logs = pd.read_sql_query(query, conn, params=(start_str, end_str, site_filter))
 
         # Summary Metrics
         total_disruption = df_logs["work_disruption_hrs"].sum() if not df_logs.empty else 0.0
