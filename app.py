@@ -6955,6 +6955,7 @@ elif role == "Office Manager":
     render_office_manager_dashboard(conn)
     
 # --- ROLE 5: ACCOUNTING (OPTIMIZED) ---
+# --- ROLE 5: ACCOUNTING (OPTIMIZED & CORRECTLY SCOPED) ---
 elif role == "Accounting":
     from datetime import datetime, timedelta
 
@@ -6993,14 +6994,14 @@ elif role == "Accounting":
             st.rerun()
         
         tab_coa, tab_apv, tab_payment, tab_gl, tab_fs, tab_br, tab_brm = st.tabs([
-        "📊 Chart of Accounts", 
-        "📝 Accounts Payable Voucher (APV)", 
-        "💸 Check / Payment Voucher (CV)", 
-        "📖 General Ledger Entries",
-        "📈 Financial Statements",
-        "🏦 Bank Reconciliation",   
-        "🏦 Bank Loans"  # <--- NEW TAB 6
-    ])
+            "📊 Chart of Accounts", 
+            "📝 Accounts Payable Voucher (APV)", 
+            "💸 Check / Payment Voucher (CV)", 
+            "📖 General Ledger Entries",
+            "📈 Financial Statements",
+            "🏦 Bank Reconciliation",   
+            "🏦 Bank Loans"
+        ])
         
         # --- TAB 0: CHART OF ACCOUNTS ---
         with tab_coa:
@@ -7950,202 +7951,203 @@ elif role == "Accounting":
                 else:
                     st.info("No recorded payment vouchers found to delete.")
 
-    # --- TAB 3: GENERAL LEDGER ---
-    with tab_gl:
-        st.write("### 📖 Real-Time General Ledger Journal Entries")
-        
-        gl_df = pd.read_sql_query("""
-            SELECT 
-                j.id AS 'Entry ID', 
-                j.entry_date AS 'Date', 
-                j.voucher_no AS 'Voucher No', 
-                j.account_code AS 'Account Code', 
-                j.account_name AS 'Account Name', 
-                j.debit AS 'Debit', 
-                j.credit AS 'Credit', 
-                j.ref_no AS 'Ref Doc', 
-                j.description AS 'Description',
-                COALESCE(NULLIF(j.project_name, ''), d.project_name, '') AS 'Project Name',
-                COALESCE(d.supplier, '') AS 'Supplier'
-            FROM journal_entries j
-            LEFT JOIN deliveries d ON (j.ref_no = d.dr_number OR j.ref_no = d.apv_number OR j.ref_no = d.cv_number)
-            ORDER BY j.id DESC
-        """, conn)
-        
-        suppliers_df = pd.read_sql_query("SELECT DISTINCT supplier FROM deliveries WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC", conn)
-        supplier_list = suppliers_df['supplier'].tolist() if not suppliers_df.empty else []
+        # --- TAB 3: GENERAL LEDGER ---
+        with tab_gl:
+            st.write("### 📖 Real-Time General Ledger Journal Entries")
+            
+            gl_df = pd.read_sql_query("""
+                SELECT 
+                    j.id AS 'Entry ID', 
+                    j.entry_date AS 'Date', 
+                    j.voucher_no AS 'Voucher No', 
+                    j.account_code AS 'Account Code', 
+                    j.account_name AS 'Account Name', 
+                    j.debit AS 'Debit', 
+                    j.credit AS 'Credit', 
+                    j.ref_no AS 'Ref Doc', 
+                    j.description AS 'Description',
+                    COALESCE(NULLIF(j.project_name, ''), d.project_name, '') AS 'Project Name',
+                    COALESCE(d.supplier, '') AS 'Supplier'
+                FROM journal_entries j
+                LEFT JOIN deliveries d ON (j.ref_no = d.dr_number OR j.ref_no = d.apv_number OR j.ref_no = d.cv_number)
+                ORDER BY j.id DESC
+            """, conn)
+            
+            suppliers_df = pd.read_sql_query("SELECT DISTINCT supplier FROM deliveries WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC", conn)
+            supplier_list = suppliers_df['supplier'].tolist() if not suppliers_df.empty else []
 
-        if not gl_df.empty:
-            st.markdown("---")
-            st.subheader("🔍 Filter & Subsummary")
-            
-            col_f1, col_f2, col_f3 = st.columns(3)
-            
-            all_accounts = ["All Account Titles"] + sorted(gl_df['Account Name'].dropna().unique().tolist())
-            selected_account = col_f1.selectbox("Filter by Account Title", all_accounts, key="gl_filter_acc")
-            
-            all_suppliers = ["All Suppliers"] + sorted(supplier_list)
-            selected_supplier = col_f2.selectbox("Filter by Supplier", all_suppliers, key="gl_filter_sup")
-            
-            project_list = sorted([str(p) for p in gl_df['Project Name'].dropna().unique().tolist() if str(p).strip() != ''])
-            all_projects = ["All Projects"] + project_list
-            selected_project = col_f3.selectbox("Filter by Project", all_projects, key="gl_filter_proj")
-            
-            filtered_df = gl_df.copy()
-            
-            if selected_account != "All Account Titles":
-                filtered_df = filtered_df[filtered_df['Account Name'] == selected_account]
+            if not gl_df.empty:
+                st.markdown("---")
+                st.subheader("🔍 Filter & Subsummary")
                 
-            if selected_supplier != "All Suppliers":
-                filtered_df = filtered_df[
-                    (filtered_df['Supplier'] == selected_supplier) | 
-                    (filtered_df['Description'].str.contains(selected_supplier, case=False, na=False))
-                ]
+                col_f1, col_f2, col_f3 = st.columns(3)
                 
-            if selected_project != "All Projects":
-                filtered_df = filtered_df[filtered_df['Project Name'] == selected_project]
-
-            sub_debit = filtered_df["Debit"].sum()
-            sub_credit = filtered_df["Credit"].sum()
-            sub_net = sub_debit - sub_credit
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Filtered Total Debits", f"₱{sub_debit:,.2f}")
-            m2.metric("Filtered Total Credits", f"₱{sub_credit:,.2f}")
-            m3.metric("Net Activity (Debit - Credit)", f"₱{sub_net:,.2f}")
-            
-            st.markdown("---")
-            
-            display_df = filtered_df.drop(columns=['Supplier'])
-            st.dataframe(
-                display_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), 
-                hide_index=True
-            )
-
-            csv_gl = display_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Filtered General Ledger as CSV",
-                data=csv_gl,
-                file_name=f"general_ledger_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                key="download_gl_filtered_csv"
-            )
-        else:
-            st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
-
-    # --- TAB 4: FINANCIAL STATEMENTS ---
-    with tab_fs:
-        st.write("### 📈 Financial Statements & Performance Reports")
-        
-        fs_tab1, fs_tab2 = st.tabs(["Income Statement", "Balance Sheet"])
-
-        with fs_tab1:
-            st.subheader("Income Statement (Profit & Loss)")
-            col1, col2 = st.columns(2)
-            start_d = col1.date_input("Start Date", pd.to_datetime("2026-01-01"), key="is_start_date")
-            end_d = col2.date_input("End Date", pd.to_datetime("2026-12-31"), key="is_end_date")
-
-            df_is = get_income_statement(conn, start_d, end_d)
-            
-            rev_df = df_is[df_is['account_type'] == 'Revenue']
-            exp_df = df_is[df_is['account_type'] == 'Expense']
-            
-            total_rev = rev_df['amount'].sum() if not rev_df.empty else 0.0
-            total_exp = exp_df['amount'].sum() if not exp_df.empty else 0.0
-            net_income = total_rev - total_exp
-
-            st.markdown("**Revenues**")
-            st.dataframe(rev_df[['account_code', 'account_name', 'amount']].rename(
-                columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
-            ), hide_index=True)
-            st.metric("Total Revenue", f"₱{total_rev:,.2f}")
-
-            st.markdown("**Expenses & Costs**")
-            st.dataframe(exp_df[['account_code', 'account_name', 'amount']].rename(
-                columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
-            ), hide_index=True)
-            st.metric("Total Expenses", f"₱{total_exp:,.2f}")
-            
-            st.divider()
-            st.metric("NET INCOME / (LOSS)", f"₱{net_income:,.2f}")
-
-        with fs_tab2:
-            st.subheader("Balance Sheet")
-            as_of = st.date_input("As of Date", pd.to_datetime("2026-12-31"), key="bs_as_of_date")
-        
-            df_bs = get_balance_sheet(conn, as_of)
-            df_is_till_date = get_income_statement(conn, "1900-01-01", as_of)
-            
-            rev_until = df_is_till_date[df_is_till_date['account_type'] == 'Revenue']['amount'].sum() if not df_is_till_date.empty and 'account_type' in df_is_till_date.columns else 0.0
-            exp_until = df_is_till_date[df_is_till_date['account_type'] == 'Expense']['amount'].sum() if not df_is_till_date.empty and 'account_type' in df_is_till_date.columns else 0.0
-            current_net_income = rev_until - exp_until
-        
-            assets = df_bs[df_bs['account_type'] == 'Asset'] if not df_bs.empty else pd.DataFrame()
-            liabilities = df_bs[df_bs['account_type'] == 'Liability'] if not df_bs.empty else pd.DataFrame()
-            equity = df_bs[df_bs['account_type'] == 'Equity'] if not df_bs.empty else pd.DataFrame()
-        
-            tot_assets = assets['amount'].sum() if not assets.empty else 0.0
-            tot_liab = liabilities['amount'].sum() if not liabilities.empty else 0.0
-            tot_equity = (equity['amount'].sum() if not equity.empty else 0.0) + current_net_income
-        
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.markdown("**Assets**")
-                if not assets.empty:
-                    st.dataframe(
-                        assets[['account_code', 'account_name', 'amount']]
-                        .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
-                        .style.format({"Amount (₱)": "₱{:,.2f}"}), 
-                        hide_index=True
-                    )
-                else:
-                    st.info("No asset entries found.")
-                st.metric("Total Assets", f"₱{tot_assets:,.2f}")
-        
-            with col_b:
-                st.markdown("**Liabilities**")
-                if not liabilities.empty:
-                    st.dataframe(
-                        liabilities[['account_code', 'account_name', 'amount']]
-                        .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
-                        .style.format({"Amount (₱)": "₱{:,.2f}"}), 
-                        hide_index=True
-                    )
-                else:
-                    st.info("No liability entries found.")
-                st.metric("Total Liabilities", f"₱{tot_liab:,.2f}")
+                all_accounts = ["All Account Titles"] + sorted(gl_df['Account Name'].dropna().unique().tolist())
+                selected_account = col_f1.selectbox("Filter by Account Title", all_accounts, key="gl_filter_acc")
                 
-                st.markdown("**Equity**")
-                if not equity.empty:
-                    st.dataframe(
-                        equity[['account_code', 'account_name', 'amount']]
-                        .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
-                        .style.format({"Amount (₱)": "₱{:,.2f}"}), 
-                        hide_index=True
-                    )
+                all_suppliers = ["All Suppliers"] + sorted(supplier_list)
+                selected_supplier = col_f2.selectbox("Filter by Supplier", all_suppliers, key="gl_filter_sup")
                 
-                st.write(f"Current Period Net Profit: **₱{current_net_income:,.2f}**")
-                st.metric("Total Equity", f"₱{tot_equity:,.2f}")
-        
-            st.divider()
-            tot_liab_equity = tot_liab + tot_equity
-            balanced = abs(tot_assets - tot_liab_equity) < 0.01
-            
-            if balanced:
-                st.success(f"✅ Balance Check Passed: Total Assets (₱{tot_assets:,.2f}) = Liabilities + Equity (₱{tot_liab_equity:,.2f})")
+                project_list = sorted([str(p) for p in gl_df['Project Name'].dropna().unique().tolist() if str(p).strip() != ''])
+                all_projects = ["All Projects"] + project_list
+                selected_project = col_f3.selectbox("Filter by Project", all_projects, key="gl_filter_proj")
+                
+                filtered_df = gl_df.copy()
+                
+                if selected_account != "All Account Titles":
+                    filtered_df = filtered_df[filtered_df['Account Name'] == selected_account]
+                    
+                if selected_supplier != "All Suppliers":
+                    filtered_df = filtered_df[
+                        (filtered_df['Supplier'] == selected_supplier) | 
+                        (filtered_df['Description'].str.contains(selected_supplier, case=False, na=False))
+                    ]
+                    
+                if selected_project != "All Projects":
+                    filtered_df = filtered_df[filtered_df['Project Name'] == selected_project]
+
+                sub_debit = filtered_df["Debit"].sum()
+                sub_credit = filtered_df["Credit"].sum()
+                sub_net = sub_debit - sub_credit
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Filtered Total Debits", f"₱{sub_debit:,.2f}")
+                m2.metric("Filtered Total Credits", f"₱{sub_credit:,.2f}")
+                m3.metric("Net Activity (Debit - Credit)", f"₱{sub_net:,.2f}")
+                
+                st.markdown("---")
+                
+                display_df = filtered_df.drop(columns=['Supplier'])
+                st.dataframe(
+                    display_df.style.format({"Debit": "₱{:,.2f}", "Credit": "₱{:,.2f}"}), 
+                    hide_index=True
+                )
+
+                csv_gl = display_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Filtered General Ledger as CSV",
+                    data=csv_gl,
+                    file_name=f"general_ledger_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_gl_filtered_csv"
+                )
             else:
-                st.error(f"⚠️ Unbalanced! Assets: ₱{tot_assets:,.2f} | Liabilities + Equity: ₱{tot_liab_equity:,.2f}")
+                st.info("No journal entries posted yet. Generate an APV or CV to trigger automated entries.")
 
-    # --- TAB 5: BANK RECONCILIATION ---
-    with tab_br:
-        render_bank_reconciliation_tab(conn)
+        # --- TAB 4: FINANCIAL STATEMENTS ---
+        with tab_fs:
+            st.write("### 📈 Financial Statements & Performance Reports")
+            
+            fs_tab1, fs_tab2 = st.tabs(["Income Statement", "Balance Sheet"])
 
-    # --- TAB 6: BANK LOANS ---
-    with tab_brm:
-        conn_loans = get_db_connection()
-        render_bank_loans_dashboard(conn_loans)
+            with fs_tab1:
+                st.subheader("Income Statement (Profit & Loss)")
+                col1, col2 = st.columns(2)
+                start_d = col1.date_input("Start Date", pd.to_datetime("2026-01-01"), key="is_start_date")
+                end_d = col2.date_input("End Date", pd.to_datetime("2026-12-31"), key="is_end_date")
+
+                df_is = get_income_statement(conn, start_d, end_d)
+                
+                rev_df = df_is[df_is['account_type'] == 'Revenue']
+                exp_df = df_is[df_is['account_type'] == 'Expense']
+                
+                total_rev = rev_df['amount'].sum() if not rev_df.empty else 0.0
+                total_exp = exp_df['amount'].sum() if not exp_df.empty else 0.0
+                net_income = total_rev - total_exp
+
+                st.markdown("**Revenues**")
+                st.dataframe(rev_df[['account_code', 'account_name', 'amount']].rename(
+                    columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
+                ), hide_index=True)
+                st.metric("Total Revenue", f"₱{total_rev:,.2f}")
+
+                st.markdown("**Expenses & Costs**")
+                st.dataframe(exp_df[['account_code', 'account_name', 'amount']].rename(
+                    columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'}
+                ), hide_index=True)
+                st.metric("Total Expenses", f"₱{total_exp:,.2f}")
+                
+                st.divider()
+                st.metric("NET INCOME / (LOSS)", f"₱{net_income:,.2f}")
+
+            with fs_tab2:
+                st.subheader("Balance Sheet")
+                as_of = st.date_input("As of Date", pd.to_datetime("2026-12-31"), key="bs_as_of_date")
+            
+                df_bs = get_balance_sheet(conn, as_of)
+                df_is_till_date = get_income_statement(conn, "1900-01-01", as_of)
+                
+                rev_until = df_is_till_date[df_is_till_date['account_type'] == 'Revenue']['amount'].sum() if not df_is_till_date.empty and 'account_type' in df_is_till_date.columns else 0.0
+                exp_until = df_is_till_date[df_is_till_date['account_type'] == 'Expense']['amount'].sum() if not df_is_till_date.empty and 'account_type' in df_is_till_date.columns else 0.0
+                current_net_income = rev_until - exp_until
+            
+                assets = df_bs[df_bs['account_type'] == 'Asset'] if not df_bs.empty else pd.DataFrame()
+                liabilities = df_bs[df_bs['account_type'] == 'Liability'] if not df_bs.empty else pd.DataFrame()
+                equity = df_bs[df_bs['account_type'] == 'Equity'] if not df_bs.empty else pd.DataFrame()
+            
+                tot_assets = assets['amount'].sum() if not assets.empty else 0.0
+                tot_liab = liabilities['amount'].sum() if not liabilities.empty else 0.0
+                tot_equity = (equity['amount'].sum() if not equity.empty else 0.0) + current_net_income
+            
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.markdown("**Assets**")
+                    if not assets.empty:
+                        st.dataframe(
+                            assets[['account_code', 'account_name', 'amount']]
+                            .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
+                            .style.format({"Amount (₱)": "₱{:,.2f}"}), 
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No asset entries found.")
+                    st.metric("Total Assets", f"₱{tot_assets:,.2f}")
+            
+                with col_b:
+                    st.markdown("**Liabilities**")
+                    if not liabilities.empty:
+                        st.dataframe(
+                            liabilities[['account_code', 'account_name', 'amount']]
+                            .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
+                            .style.format({"Amount (₱)": "₱{:,.2f}"}), 
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No liability entries found.")
+                    st.metric("Total Liabilities", f"₱{tot_liab:,.2f}")
+                    
+                    st.markdown("**Equity**")
+                    if not equity.empty:
+                        st.dataframe(
+                            equity[['account_code', 'account_name', 'amount']]
+                            .rename(columns={'account_code': 'Code', 'account_name': 'Account', 'amount': 'Amount (₱)'})
+                            .style.format({"Amount (₱)": "₱{:,.2f}"}), 
+                            hide_index=True
+                        )
+                    
+                    st.write(f"Current Period Net Profit: **₱{current_net_income:,.2f}**")
+                    st.metric("Total Equity", f"₱{tot_equity:,.2f}")
+            
+                st.divider()
+                tot_liab_equity = tot_liab + tot_equity
+                balanced = abs(tot_assets - tot_liab_equity) < 0.01
+                
+                if balanced:
+                    st.success(f"✅ Balance Check Passed: Total Assets (₱{tot_assets:,.2f}) = Liabilities + Equity (₱{tot_liab_equity:,.2f})")
+                else:
+                    st.error(f"⚠️ Unbalanced! Assets: ₱{tot_assets:,.2f} | Liabilities + Equity: ₱{tot_liab_equity:,.2f}")
+
+        # --- TAB 5: BANK RECONCILIATION ---
+        with tab_br:
+            render_bank_reconciliation_tab(conn)
+
+        # --- TAB 6: BANK LOANS ---
+        with tab_brm:
+            conn_loans = get_db_connection()
+            render_bank_loans_dashboard(conn_loans)
 
     render_accounting_dashboard(conn)
+    
     
 
                   
