@@ -6,6 +6,9 @@ import streamlit as st
 import re
 import os
 
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
+
 # --- TOP OF APP.PY ---
 @st.cache_data(ttl=30)
 def get_cached_projects(_conn):
