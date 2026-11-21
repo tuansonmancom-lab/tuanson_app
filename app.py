@@ -7007,6 +7007,7 @@ elif role == "Accounting":
         ])
         
         # --- TAB 0: CHART OF ACCOUNTS ---
+        # --- TAB 0: CHART OF ACCOUNTS ---
         with tab_coa:
             st.subheader("📊 Manage Chart of Accounts")
             st.info("View, add, or manage financial account codes used across General Ledger postings and vouchers.")
@@ -7028,6 +7029,7 @@ elif role == "Accounting":
                                 """, (new_acc_code.strip(), new_acc_name.strip(), new_acc_type))
                                 conn.commit()
                                 st.cache_data.clear()
+                                st.session_state["show_coa_table"] = True
                                 st.success(f"Account {new_acc_code.strip()} - {new_acc_name.strip()} added successfully!")
                                 st.rerun()
                             except Exception:
@@ -7035,17 +7037,31 @@ elif role == "Accounting":
                         else:
                             st.warning("⚠️ Please provide both an Account Code and Account Name.")
 
-            df_coa = pd.read_sql_query("""
-                SELECT account_code AS 'Account Code', account_name AS 'Account Name', 
-                       account_type AS 'Account Type', status AS 'Status'
-                FROM chart_of_accounts
-                ORDER BY account_code ASC
-            """, conn)
-            
-            if not df_coa.empty:
-                st.dataframe(df_coa, hide_index=True)
+            if "show_coa_table" not in st.session_state:
+                st.session_state["show_coa_table"] = False
+
+            col_b1, col_b2, _ = st.columns([1.5, 1.5, 3])
+            if col_b1.button("📋 Load Account Codes", key="btn_load_coa_codes"):
+                st.session_state["show_coa_table"] = True
+
+            if st.session_state["show_coa_table"]:
+                if col_b2.button("🙈 Hide Account Codes", key="btn_hide_coa_codes"):
+                    st.session_state["show_coa_table"] = False
+                    st.rerun()
+
+                df_coa = pd.read_sql_query("""
+                    SELECT account_code AS 'Account Code', account_name AS 'Account Name', 
+                           account_type AS 'Account Type', status AS 'Status'
+                    FROM chart_of_accounts
+                    ORDER BY account_code ASC
+                """, conn)
+                
+                if not df_coa.empty:
+                    st.dataframe(df_coa, hide_index=True)
+                else:
+                    st.info("No accounts found in the Chart of Accounts.")
             else:
-                st.info("No accounts found in the Chart of Accounts.")
+                st.caption("Click **Load Account Codes** to query and display the Chart of Accounts.")
                 
         # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
         with tab_apv:
