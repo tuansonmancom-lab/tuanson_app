@@ -7264,6 +7264,7 @@ elif role == "Accounting":
                 st.info("No generated APVs available for printing yet.")
 
         # --- TAB 2: CHECK VOUCHER / PAYMENT ---
+        # --- TAB 2: CHECK VOUCHER / PAYMENT ---
         with tab_payment:
             st.write("### 💳 Outstanding Payables & AP Aging Summary")
             
@@ -7621,6 +7622,16 @@ elif role == "Accounting":
             st.markdown("---")
             st.subheader("🖨️ Issued Check / Payment Vouchers (Ready for Printing)")
 
+            if "cv_page" not in st.session_state:
+                st.session_state["cv_page"] = 0
+
+            cv_search = st.text_input(
+                "🔍 Search Voucher #, Payee/Supplier, or Method",
+                value="",
+                placeholder="Type CV-00001, supplier name, or Check/Cash...",
+                key="cv_print_search"
+            ).strip().lower()
+
             del_cvs = []
             try:
                 del_cvs = c.execute("""
@@ -7661,9 +7672,49 @@ elif role == "Accounting":
                     issued_cvs.append(record)
 
             issued_cvs.sort(key=lambda x: str(x[1] or ''), reverse=True)
+
+            if cv_search and issued_cvs:
+                issued_cvs = [
+                    row for row in issued_cvs
+                    if cv_search in str(row[0] or "").lower()
+                    or cv_search in str(row[3] or "").lower()
+                    or cv_search in str(row[4] or "").lower()
+                ]
             
             if issued_cvs and HAS_REPORTLAB:
-                for idx, cv in enumerate(issued_cvs):
+                page_size = 10
+                total_items = len(issued_cvs)
+                total_pages = max(1, (total_items + page_size - 1) // page_size)
+
+                if st.session_state["cv_page"] >= total_pages:
+                    st.session_state["cv_page"] = total_pages - 1
+                if st.session_state["cv_page"] < 0:
+                    st.session_state["cv_page"] = 0
+
+                curr_page = st.session_state["cv_page"]
+                start_idx = curr_page * page_size
+                end_idx = start_idx + page_size
+                page_cvs = issued_cvs[start_idx:end_idx]
+
+                nav_prev, nav_info, nav_next = st.columns([1, 2, 1])
+                with nav_prev:
+                    if st.button("⬅️ Previous 10", disabled=(curr_page == 0), key="btn_cv_prev"):
+                        st.session_state["cv_page"] -= 1
+                        st.rerun()
+                with nav_info:
+                    st.markdown(
+                        f"<div style='text-align:center; padding-top:6px;'>"
+                        f"Showing <b>{start_idx + 1}–{min(end_idx, total_items)}</b> of <b>{total_items}</b> Vouchers "
+                        f"(Page <b>{curr_page + 1}</b> of <b>{total_pages}</b>)</div>",
+                        unsafe_allow_html=True
+                    )
+                with nav_next:
+                    if st.button("Next 10 ➡️", disabled=(curr_page >= total_pages - 1), key="btn_cv_next"):
+                        st.session_state["cv_page"] += 1
+                        st.rerun()
+
+                for idx, cv in enumerate(page_cvs):
+                    abs_idx = start_idx + idx
                     cv_no, cv_date, apv_no, supplier, pay_method, total_amt, c_num, c_date = cv
                     
                     existing_disc_row = c.execute("SELECT credit FROM journal_entries WHERE voucher_no = ? AND account_code = '50200'", (cv_no,)).fetchone()
@@ -7684,7 +7735,7 @@ elif role == "Accounting":
 
                     net_check_amt = max(0.0, float(total_amt or 0.0) - init_discount_amt - init_wht_amt)
 
-                    st.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier/Payee:** {supplier} | **Amount:** ₱{total_amt:,.2f}")
+                    st.write(f"💳 **Voucher:** {cv_no} ({pay_method}) | **Supplier/Payee:** {supplier} | **Amount:** ₱{float(total_amt or 0):,.2f}")
                     
                     col_btn1, col_btn2 = st.columns(2)
                     
@@ -7694,7 +7745,7 @@ elif role == "Accounting":
                         data=voucher_pdf,
                         file_name=f"Voucher_{cv_no}.pdf",
                         mime="application/pdf",
-                        key=f"print_pv_{cv_no}_{idx}"
+                        key=f"print_pv_{cv_no}_{abs_idx}"
                     )
                     
                     cheque_pdf = create_cheque_pdf(supplier, net_check_amt, c_date)
@@ -7703,7 +7754,7 @@ elif role == "Accounting":
                         data=cheque_pdf,
                         file_name=f"Cheque_{cv_no}.pdf",
                         mime="application/pdf",
-                        key=f"print_chk_{cv_no}_{idx}"
+                        key=f"print_chk_{cv_no}_{abs_idx}"
                     )
 
                     with st.expander(f"⚙️ Options / Edit Details for {cv_no}"):
@@ -7712,9 +7763,9 @@ elif role == "Accounting":
                         new_voucher_amt = col_e1.number_input(
                             "Gross Payable Amount (₱)", 
                             min_value=0.01, 
-                            value=float(total_amt), 
+                            value=float(total_amt or 0.01), 
                             step=100.0, 
-                            key=f"edit_amt_val_{cv_no}_{idx}"
+                            key=f"edit_amt_val_{cv_no}_{abs_idx}"
                         )
                         
                         discount_amt = col_e2.number_input(
@@ -7722,13 +7773,13 @@ elif role == "Accounting":
                             min_value=0.0, 
                             value=float(init_discount_amt), 
                             step=50.0, 
-                            key=f"edit_disc_val_{cv_no}_{idx}"
+                            key=f"edit_disc_val_{cv_no}_{abs_idx}"
                         )
                         
                         new_check_no = col_e3.text_input(
                             "Cheque / Ref Number", 
                             value=str(c_num or ''), 
-                            key=f"edit_chk_no_{cv_no}_{idx}"
+                            key=f"edit_chk_no_{cv_no}_{abs_idx}"
                         )
                         
                         col_e4, col_e5 = st.columns(2)
@@ -7741,13 +7792,13 @@ elif role == "Accounting":
                         new_check_date = col_e4.date_input(
                             "Cheque Date", 
                             value=init_date, 
-                            key=f"edit_chk_dt_{cv_no}_{idx}"
+                            key=f"edit_chk_dt_{cv_no}_{abs_idx}"
                         )
                         
                         is_blank_dt = col_e5.checkbox(
                             "🎟️ Keep Cheque Date Blank (Open Date / Floating)", 
                             value=(not bool(c_date)), 
-                            key=f"blank_dt_{cv_no}_{idx}"
+                            key=f"blank_dt_{cv_no}_{abs_idx}"
                         )
                         
                         st.markdown("---")
@@ -7757,7 +7808,7 @@ elif role == "Accounting":
                             "Withholding Tax (BIR Form 2307)",
                             options=["0% (None)", "1% (Goods - WI158)", "2% (Services - WI160)"],
                             index=default_wht_index,
-                            key=f"edit_wht_opt_{cv_no}_{idx}"
+                            key=f"edit_wht_opt_{cv_no}_{abs_idx}"
                         )
                         
                         if "1%" in wht_option:
@@ -7786,23 +7837,23 @@ elif role == "Accounting":
                         b_col1, b_col2 = st.columns([1, 1])
                         
                         with b_col1:
-                            save_clicked = st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{idx}", type="primary")
+                            save_clicked = st.button("💾 Save All Changes", key=f"btn_save_all_{cv_no}_{abs_idx}", type="primary")
                         
                         with b_col2:
                             if computed_tax_withheld > 0:
                                 try:
                                     supp_row = conn.execute(
                                         "SELECT tin_number, location FROM suppliers WHERE LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))", 
-                                        (supplier_name,)
+                                        (supplier,)
                                     ).fetchone()
                                     
                                     supplier_tin = supp_row[0] if (supp_row and supp_row[0]) else "000-000-000-000"
                                     supplier_address = supp_row[1] if (supp_row and supp_row[1]) else "N/A"
                                     
-                                    today = datetime.now()
-                                    q_start_month = 3 * ((today.month - 1) // 3) + 1
-                                    period_from = datetime(today.year, q_start_month, 1).strftime('%m/%d/%Y')
-                                    period_to = today.strftime('%m/%d/%Y')
+                                    cert_today = datetime.now()
+                                    q_start_month = 3 * ((cert_today.month - 1) // 3) + 1
+                                    period_from = datetime(cert_today.year, q_start_month, 1).strftime('%m/%d/%Y')
+                                    period_to = cert_today.strftime('%m/%d/%Y')
                     
                                     pdf_buffer = generate_bir_2307_pdf(
                                         voucher_data={
@@ -7811,8 +7862,8 @@ elif role == "Accounting":
                                             "period_to": period_to
                                         },
                                         supplier_data={
-                                            "payee_name": supplier_name,
-                                            "name": supplier_name,
+                                            "payee_name": supplier,
+                                            "name": supplier,
                                             "payee_tin": supplier_tin,
                                             "tin": supplier_tin,
                                             "payee_address": supplier_address,
@@ -7831,7 +7882,7 @@ elif role == "Accounting":
                                         data=pdf_buffer,
                                         file_name=f"BIR_Form_2307_{cv_no}.pdf",
                                         mime="application/pdf",
-                                        key=f"dl_2307_{cv_no}_{idx}"
+                                        key=f"dl_2307_{cv_no}_{abs_idx}"
                                     )
                                 except Exception as pdf_err:
                                     st.error(f"⚠️ Could not build BIR 2307 PDF: {pdf_err}")
@@ -7925,7 +7976,7 @@ elif role == "Accounting":
 
                     st.markdown("---")
             else:
-                st.info("No issued check or payment vouchers available for printing yet.")    
+                st.info("No issued check or payment vouchers available for printing yet.")
                     
         # --- ADMIN / VOUCHER RESET TOOL ---
         if role in ["Accounting", "Admin View All"]:
