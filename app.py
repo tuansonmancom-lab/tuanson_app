@@ -7064,6 +7064,7 @@ elif role == "Accounting":
                 st.caption("Click **Load Account Codes** to query and display the Chart of Accounts.")
                 
         # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
+        # --- TAB 1: ACCOUNTS PAYABLE VOUCHER (APV) ---
         with tab_apv:
             st.write("### 📦 Received Deliveries Awaiting APV Generation")
             st.info("Receiving tab logs received items. Generate APV here to record Accounts Payable in the General Ledger.")
@@ -7127,8 +7128,8 @@ elif role == "Accounting":
                 
                 st.info(f"""
                 💡 **Accounting Entry Preview:**
-                * **Debit:** {selected_acc_name} (Code {selected_acc_code})
-                * **Credit:** Accounts Payable-Trade (Code 20100)
+- **Debit:** {selected_acc_name} (Code {selected_acc_code})
+- **Credit:** Accounts Payable-Trade (Code 20100)
                 """)
                 
                 if st.button("✅ Generate Accounts Payable Voucher", type="primary", key="btn_generate_apv"):
@@ -7185,19 +7186,69 @@ elif role == "Accounting":
 
             st.markdown("---")
             st.subheader("🖨️ Generated Accounts Payable Vouchers (Ready for Printing)")
-            
+
+            if "apv_page" not in st.session_state:
+                st.session_state["apv_page"] = 0
+
+            apv_search = st.text_input(
+                "🔍 Search APV #, Supplier, or Project",
+                value="",
+                placeholder="Type APV-00005, supplier name, or project...",
+                key="apv_print_search"
+            ).strip().lower()
+
             generated_apvs = c.execute("""
                 SELECT apv_number, apv_date, dr_number, pono, supplier, project_name, total_amount 
                 FROM deliveries 
                 WHERE apv_number IS NOT NULL AND apv_number != ''
                 ORDER BY apv_date DESC
             """).fetchall()
-            
+
+            if apv_search and generated_apvs:
+                generated_apvs = [
+                    row for row in generated_apvs
+                    if apv_search in str(row[0] or "").lower()
+                    or apv_search in str(row[4] or "").lower()
+                    or apv_search in str(row[5] or "").lower()
+                ]
+
             if generated_apvs and HAS_REPORTLAB:
-                for idx, apv in enumerate(generated_apvs):
+                page_size = 10
+                total_items = len(generated_apvs)
+                total_pages = max(1, (total_items + page_size - 1) // page_size)
+
+                if st.session_state["apv_page"] >= total_pages:
+                    st.session_state["apv_page"] = total_pages - 1
+                if st.session_state["apv_page"] < 0:
+                    st.session_state["apv_page"] = 0
+
+                curr_page = st.session_state["apv_page"]
+                start_idx = curr_page * page_size
+                end_idx = start_idx + page_size
+                page_apvs = generated_apvs[start_idx:end_idx]
+
+                nav_prev, nav_info, nav_next = st.columns([1, 2, 1])
+                with nav_prev:
+                    if st.button("⬅️ Previous 10", disabled=(curr_page == 0), key="btn_apv_prev"):
+                        st.session_state["apv_page"] -= 1
+                        st.rerun()
+                with nav_info:
+                    st.markdown(
+                        f"<div style='text-align:center; padding-top:6px;'>"
+                        f"Showing <b>{start_idx + 1}–{min(end_idx, total_items)}</b> of <b>{total_items}</b> APVs "
+                        f"(Page <b>{curr_page + 1}</b> of <b>{total_pages}</b>)</div>",
+                        unsafe_allow_html=True
+                    )
+                with nav_next:
+                    if st.button("Next 10 ➡️", disabled=(curr_page >= total_pages - 1), key="btn_apv_next"):
+                        st.session_state["apv_page"] += 1
+                        st.rerun()
+
+                for idx, apv in enumerate(page_apvs):
+                    abs_idx = start_idx + idx
                     apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt = apv
                     col_info, col_btn = st.columns([3, 1])
-                    col_info.write(f"📄 **APV:** {apv_no} | **Supplier:** {supplier} | **Project:** {proj} | **Amount:** ₱{total_amt:,.2f}")
+                    col_info.write(f"📄 **APV:** {apv_no} | **Supplier:** {supplier} | **Project:** {proj} | **Amount:** ₱{float(total_amt or 0):,.2f}")
                     
                     pdf_bytes = create_apv_pdf(apv_no, apv_date, dr_no, po_no, supplier, proj, total_amt, conn)
                     col_btn.download_button(
@@ -7205,48 +7256,12 @@ elif role == "Accounting":
                         data=pdf_bytes,
                         file_name=f"APV_{apv_no}.pdf",
                         mime="application/pdf",
-                        key=f"print_apv_{apv_no}_{idx}"
+                        key=f"print_apv_{apv_no}_{abs_idx}"
                     )
+            elif apv_search:
+                st.info(f"No generated APVs matched '{apv_search}'.")
             else:
                 st.info("No generated APVs available for printing yet.")
-
-        # --- AUTOMATIC SETTLEMENT OF APVs WITH ADVANCE PDCs ---
-        try:
-            prepaid_apvs = c.execute("""
-                SELECT d.apv_number, d.total_amount, d.supplier, d.project_name, d.pono, r.cv_number
-                FROM deliveries d
-                JOIN requests r ON d.pono = r.pono
-                WHERE (d.payment_status = 'Unpaid' OR d.payment_status IS NULL)
-                  AND d.apv_number IS NOT NULL AND d.apv_number != ''
-                  AND r.payment_status = 'Paid'
-                  AND r.cv_number IS NOT NULL AND r.cv_number != ''
-            """).fetchall()
-        
-            for apv_no, amt, supplier, proj, po_no, existing_cv in prepaid_apvs:
-                now_ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                
-                c.execute("""
-                    UPDATE deliveries 
-                    SET payment_status = 'Paid (Applied Advance)', 
-                        cv_number = ?, 
-                        cv_date = ? 
-                    WHERE apv_number = ?
-                """, (existing_cv, now_ts, apv_no))
-        
-                c.execute("""
-                    INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                    VALUES (?, ?, '20100', 'Accounts Payable-Trade', ?, 0.0, ?, ?, ?)
-                """, (now_ts, existing_cv, amt, apv_no, f"Applied Advance ({existing_cv}) to APV {apv_no}", proj))
-        
-                c.execute("""
-                    INSERT INTO journal_entries (entry_date, voucher_no, account_code, account_name, debit, credit, ref_no, description, project_name)
-                    VALUES (?, ?, '10500', ?, 0.0, ?, ?, ?, ?)
-                """, (now_ts, existing_cv, f"Advances to Suppliers - {supplier}", amt, apv_no, f"Settled Advance for APV {apv_no}", proj))
-        
-            if prepaid_apvs:
-                conn.commit()
-        except Exception:
-            pass
 
         # --- TAB 2: CHECK VOUCHER / PAYMENT ---
         with tab_payment:
